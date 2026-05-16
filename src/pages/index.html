@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>商品价格与库存监控</title>
+    <link rel="stylesheet" href="./index.css" />
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>商品价格与库存监控</h1>
+        <p class="header-subtitle">
+          <span>AI Agent 商品全流程跟踪系统</span>
+          <button class="manual-entry-btn" type="button">用户手册</button>
+        </p>
+      </div>
+
+      <div class="list-toolbar">
+        <div class="list-tabs" role="tablist" aria-label="监控列表切换">
+          <button
+            class="tab-btn active"
+            id="sourceTab"
+            type="button"
+            data-panel="source"
+            role="tab"
+            aria-selected="true"
+          >
+            <span>URL监控</span>
+            <span class="tab-count" id="sourceCount">0</span>
+          </button>
+          <button
+            class="tab-btn"
+            id="productTab"
+            type="button"
+            data-panel="product"
+            role="tab"
+            aria-selected="false"
+          >
+            <span>商品查询</span>
+            <span class="tab-count" id="productCount">0</span>
+          </button>
+        </div>
+        <div class="toolbar-actions">
+          <button class="btn btn-secondary" id="refreshButton" type="button">刷新</button>
+          <label class="btn btn-primary file-import-btn">
+            <input id="excelInput" type="file" accept=".xlsx,.xls,.csv" />
+            <span>导入URL</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="barcode-search-panel" id="productSearchPanel" hidden>
+        <div class="barcode-search-actions">
+          <label class="barcode-search-field" for="nameFilter">
+            <input
+              class="barcode-search-input"
+              id="nameFilter"
+              type="search"
+              placeholder="输入商品名称搜索"
+            />
+          </label>
+          <label class="barcode-search-field" for="urlFilter">
+            <input
+              class="barcode-search-input"
+              id="urlFilter"
+              type="search"
+              placeholder="输入URL搜索"
+            />
+          </label>
+        </div>
+      </div>
+
+      <section class="table-container" id="sourcePanel" role="tabpanel" aria-labelledby="sourceTab">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 52%;">URL</th>
+              <th style="width: 14%;">商品数</th>
+              <th style="width: 18%;">最近检查</th>
+              <th style="width: 16%;">状态</th>
+            </tr>
+          </thead>
+          <tbody id="sourceRows"></tbody>
+        </table>
+        <div class="empty-state" id="sourceEmpty">暂无监控 URL，请先导入 Excel。</div>
+      </section>
+
+      <section
+        class="table-container"
+        id="productPanel"
+        role="tabpanel"
+        aria-labelledby="productTab"
+        hidden
+      >
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 28%;">商品信息</th>
+              <th style="width: 12%;">价格</th>
+              <th style="width: 12%;">库存</th>
+              <th style="width: 32%;">来源 URL</th>
+              <th style="width: 16%;">更新时间</th>
+            </tr>
+          </thead>
+          <tbody id="productRows"></tbody>
+        </table>
+        <div class="empty-state" id="productEmpty">暂无匹配商品。</div>
+      </section>
+    </div>
+
+    <div class="modal" id="importModal" role="dialog" aria-modal="true" aria-labelledby="importModalTitle">
+      <div class="modal-content">
+        <div class="modal-title" id="importModalTitle">导入提示</div>
+        <div class="modal-body" id="importModalBody">-</div>
+        <div class="modal-actions">
+          <button class="btn btn-primary" id="importModalCloseButton" type="button">确认</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="./index.ts"></script>
+  </body>
+</html>

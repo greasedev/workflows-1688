@@ -21,13 +21,13 @@
 
 - 更新 `src/models/types.ts`：
   - `Source` 增加 `createdAt`、`updatedAt`、`lastCheckedAt`、`lastError`。
-  - `Product` 增加 `updatedAt`。
+  - `Product` 增加 `spec`、`updatedAt`。
   - 如需要，增加工作流结果摘要类型，例如成功 URL 数、失败 URL 数、更新商品数和错误摘要。
 - 更新 `src/libs/db.ts`：
   - 保留 `source` 表唯一 URL 约束。
-  - 保留 `product` 表 `[name+url]` 唯一约束。
-  - 为 `product.url`、`product.name` 保留索引，支持 URL 查询和商品名称查询。
-  - 如 schema 版本需要变更，使用 Dexie `version(2)` 迁移，避免破坏已有数据。
+  - 保留 `product` 表 `[name+spec+url]` 唯一约束。
+  - 为 `product.url`、`product.name`、`product.spec` 保留索引，支持 URL 查询、商品名称查询和规格存储。
+  - 如 schema 版本需要变更，使用新的 Dexie 版本迁移，避免破坏已有数据；规格字段升级使用 `[name+spec+url]` 约束。
 
 验收点：
 
@@ -37,15 +37,15 @@
 
 ### 2.2 Excel 导入能力
 
-目标：实现用户通过 Excel 导入 URL 列表，固定读取 `URL` 表头并合并去重。
+目标：实现用户通过 Excel 导入 URL 列表，固定读取 `上游1` 表头并合并去重。
 
 开发任务：
 
 - 新增依赖 `xlsx`，用于浏览器端解析 Excel。
 - 在 `src/pages/index.ts` 中实现文件读取：
   - 读取第一个工作表。
-  - 使用固定表头 `URL`。
-  - 缺少 `URL` 表头时显示错误。
+  - 使用固定表头 `上游1`。
+  - 缺少 `上游1` 表头时显示错误。
   - 对每个 URL 做 `trim`。
   - 过滤空值和明显非法 URL。
 - 实现合并去重写入：
@@ -55,9 +55,9 @@
 
 验收点：
 
-- 上传包含 `URL` 表头的 Excel 后，URL 被写入 `source`。
+- 上传包含 `上游1` 表头的 Excel 后，URL 被写入 `source`。
 - 重复 URL 不重复插入。
-- 缺少 `URL` 表头时有明确错误提示。
+- 缺少 `上游1` 表头时有明确错误提示。
 
 ### 2.3 Pages 页面 UI
 
@@ -92,6 +92,7 @@ URL 监控列表交互：
 - 支持 URL 查询。
 - 商品名称和 URL 同时存在时，结果必须同时满足两个条件。
 - 查询结果展示商品名称、价格、库存、来源 URL、更新时间。
+- 商品信息列需要同时展示商品名称和规格。
 - 没有匹配结果时展示空状态。
 
 验收点：
@@ -119,15 +120,15 @@ URL 监控列表交互：
   - 优先读取 `task.extract_data`。
   - 支持解析 JSON 字符串。
   - 优先从数组本身或 `products`、`skus`、`data` 字段中识别商品数组。
-  - 跳过商品名称为空的记录。
+  - 跳过商品名称或规格为空的记录。
   - 将价格和库存转换为数字。
 - 实现商品写入：
-  - 同一 URL 下按 `[name+url]` upsert。
+  - 同一 URL 下按 `[name+spec+url]` upsert。
   - 更新 `price`、`stock`、`updatedAt`。
-  - 记录本次 URL 返回的商品名称集合。
+  - 记录本次 URL 返回的商品名称和规格集合。
 - 实现缺失商品库存置零：
   - 查询该 URL 下所有历史商品。
-  - 历史商品如果本次未出现，将 `stock` 更新为 `0`，并更新 `updatedAt`。
+  - 历史商品如果本次同名同规格记录未出现，将 `stock` 更新为 `0`，并更新 `updatedAt`。
 - 更新 URL 检查状态：
   - 成功时更新 `lastCheckedAt`，清空 `lastError`。
   - 失败时更新 `lastCheckedAt` 和 `lastError`。
@@ -159,8 +160,8 @@ URL 监控列表交互：
 
 手工验证场景：
 
-- 上传包含 `URL` 表头的 Excel，确认新增 URL 和重复 URL 统计正确。
-- 上传缺少 `URL` 表头的 Excel，确认错误提示正确。
+- 上传包含 `上游1` 表头的 Excel，确认新增 URL 和重复 URL 统计正确。
+- 上传缺少 `上游1` 表头的 Excel，确认错误提示正确。
 - URL 列表展示每条 URL 和商品数。
 - 点击 URL 打开原始 URL 页面。
 - 点击商品数进入商品查询并筛选该 URL 商品。
@@ -189,10 +190,10 @@ URL 监控列表交互：
 ## 4. 风险与处理策略
 
 - API 返回结构不稳定：实现解析函数，兼容数组、`products`、`skus`、`data` 等常见结构；无法识别时记录 URL 错误并继续。
-- Excel 内容不规范：固定要求 `URL` 表头；空 URL 和非法 URL 不导入，并在导入结果中统计。
+- Excel 内容不规范：固定要求 `上游1` 表头；空 URL 和非法 URL 不导入，并在导入结果中统计。
 - IndexedDB schema 升级：如果已有用户数据，使用 Dexie 新版本迁移，不删除旧表数据。
 - 大量 URL 导致页面卡顿：首版先按本地查询实现；如数据量变大，再增加分页或限制展示数量。
-- 商品名称变更导致重复记录：首版按 PRD 使用 `[name+url]` 唯一判断，不额外引入 SKU ID 推断。
+- 商品名称或规格变更导致重复记录：首版按 PRD 使用 `[name+spec+url]` 唯一判断，不额外引入 SKU ID 推断。
 
 ## 5. 完成定义
 
