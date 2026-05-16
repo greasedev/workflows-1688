@@ -19,5 +19,9 @@ export function initDB(agent: Agent) {
     [DB_TABLES.source]: "++id, &url, updatedAt, lastCheckedAt",
     [DB_TABLES.product]: "++id, &[name+spec+url], name, spec, url, stock, updatedAt",
   });
+  db.version(4).stores({
+    [DB_TABLES.source]: "++id, &url, isInvalid, updatedAt, lastCheckedAt",
+    [DB_TABLES.product]: "++id, &[name+spec+url], name, spec, url, stock, updatedAt",
+  });
   return db;
 }

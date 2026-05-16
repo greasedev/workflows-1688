@@ -20,11 +20,12 @@
 开发任务：
 
 - 更新 `src/models/types.ts`：
-  - `Source` 增加 `createdAt`、`updatedAt`、`lastCheckedAt`、`lastError`。
+  - `Source` 增加 `createdAt`、`updatedAt`、`lastCheckedAt`、`lastError`、`isInvalid`、`invalidAt`。
   - `Product` 增加 `spec`、`updatedAt`。
   - 如需要，增加工作流结果摘要类型，例如成功 URL 数、失败 URL 数、更新商品数和错误摘要。
 - 更新 `src/libs/db.ts`：
   - 保留 `source` 表唯一 URL 约束。
+  - 为 `source.isInvalid` 增加索引，支持工作流跳过失效 URL。
   - 保留 `product` 表 `[name+spec+url]` 唯一约束。
   - 为 `product.url`、`product.name`、`product.spec` 保留索引，支持 URL 查询、商品名称查询和规格存储。
   - 如 schema 版本需要变更，使用新的 Dexie 版本迁移，避免破坏已有数据；规格字段升级使用 `[name+spec+url]` 约束。
@@ -83,6 +84,8 @@
 URL 监控列表交互：
 
 - 每行展示 URL 和该 URL 已提取商品数。
+- 每行提供 `标记失效` 或 `恢复有效` 操作。
+- 失效 URL 状态列显示 `失效`，仍保留 URL 点击和商品数点击能力。
 - 点击 URL：打开新页面展示该 URL 的原始页面内容。
 - 点击商品数：跳转或切换到商品查询区域，并按该 URL 筛选商品。
 
@@ -114,6 +117,7 @@ URL 监控列表交互：
 - 实现工作流主逻辑：
   - 初始化 DB。
   - 读取 `source` 表中的所有 URL。
+  - 跳过 `isInvalid === true` 的失效 URL，不调用提取 API。
   - 逐个 URL 调用 `apis.get_sku_list_from_url(url)`。
   - 单个 URL 失败时记录错误并继续下一个 URL。
 - 实现 API 结果解析：
@@ -136,6 +140,7 @@ URL 监控列表交互：
   - 总 URL 数。
   - 成功 URL 数。
   - 失败 URL 数。
+  - 跳过的失效 URL 数。
   - 更新商品数。
   - 库存置零商品数。
   - 错误摘要。
@@ -163,12 +168,15 @@ URL 监控列表交互：
 - 上传包含 `上游1` 表头的 Excel，确认新增 URL 和重复 URL 统计正确。
 - 上传缺少 `上游1` 表头的 Excel，确认错误提示正确。
 - URL 列表展示每条 URL 和商品数。
+- 点击 `标记失效` 后，URL 状态显示 `失效`，工作流不再处理该 URL。
+- 点击 `恢复有效` 后，该 URL 重新参与后续工作流处理。
 - 点击 URL 打开原始 URL 页面。
 - 点击商品数进入商品查询并筛选该 URL 商品。
 - 输入商品名称关键字进行模糊查询。
 - 输入 URL 查询对应商品。
 - 同时输入商品名称和 URL，确认使用组合过滤。
 - 工作流处理多个 URL，其中一个失败时整体继续执行。
+- 工作流遇到失效 URL 时跳过，并在摘要中统计跳过数量。
 - 工作流重新抓取后，缺失商品库存更新为 `0`。
 
 ## 3. 文件级改动清单

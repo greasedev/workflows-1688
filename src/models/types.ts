@@ -5,6 +5,8 @@ export interface Source {
   updatedAt?: string; // 最近更新URL记录的时间
   lastCheckedAt?: string; // 最近一次工作流检查时间
   lastError?: string; // 最近一次处理错误信息
+  isInvalid?: boolean; // 是否已手动标记为失效URL
+  invalidAt?: string; // 手动标记失效的时间
 }
 
 export interface Product {
@@ -21,6 +23,7 @@ export interface WorkflowSummary {
   totalUrls: number;
   succeededUrls: number;
   failedUrls: number;
+  skippedInvalidUrls: number;
   updatedProducts: number;
   zeroedProducts: number;
   errors: Array<{

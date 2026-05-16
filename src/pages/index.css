@@ -344,9 +344,14 @@ tr:last-child td {
   color: var(--success);
 }
 
+.status-invalid,
 .status-error,
 .stock {
   color: var(--danger);
+}
+
+.source-action-btn {
+  min-width: 80px;
 }
 
 .price,

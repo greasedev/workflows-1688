@@ -206,9 +206,12 @@ function renderSources(sources: Source[], countsByUrl: Map<string, number>) {
     const countCell = document.createElement("td");
     const checkedCell = document.createElement("td");
     const statusCell = document.createElement("td");
+    const actionCell = document.createElement("td");
     const urlLink = document.createElement("a");
     const countButton = document.createElement("button");
+    const actionButton = document.createElement("button");
     const productTotal = countsByUrl.get(source.url) ?? 0;
+    const isInvalid = source.isInvalid === true;
 
     urlLink.className = "url-link";
     urlLink.href = source.url;
@@ -229,12 +232,38 @@ function renderSources(sources: Source[], countsByUrl: Map<string, number>) {
     countCell.append(countButton);
 
     checkedCell.textContent = formatDate(source.lastCheckedAt);
-    statusCell.className = source.lastError ? "status-error" : "status-ok";
-    statusCell.textContent = source.lastError || "正常";
+    statusCell.className = isInvalid
+      ? "status-invalid"
+      : source.lastError
+        ? "status-error"
+        : "status-ok";
+    statusCell.textContent = isInvalid ? "失效" : source.lastError || "正常";
 
-    row.append(urlCell, countCell, checkedCell, statusCell);
+    actionButton.className = isInvalid
+      ? "btn btn-primary source-action-btn"
+      : "btn btn-secondary source-action-btn";
+    actionButton.type = "button";
+    actionButton.textContent = isInvalid ? "恢复有效" : "标记失效";
+    actionButton.addEventListener("click", () => {
+      toggleSourceInvalid(source, !isInvalid);
+    });
+    actionCell.append(actionButton);
+
+    row.append(urlCell, countCell, checkedCell, statusCell, actionCell);
     sourceRows.append(row);
   }
+}
+
+async function toggleSourceInvalid(source: Source, isInvalid: boolean) {
+  if (source.id === undefined) return;
+
+  const now = new Date().toISOString();
+  await sourceTable.update(source.id, {
+    isInvalid,
+    invalidAt: isInvalid ? now : undefined,
+    updatedAt: now,
+  });
+  await loadSourcesAndProducts();
 }
 
 async function renderProductsFromDb() {
@@ -245,6 +274,13 @@ async function renderProductsFromDb() {
 function renderProducts(products: Product[]) {
   const nameQuery = nameFilter.value.trim().toLocaleLowerCase();
   const urlQuery = urlFilter.value.trim().toLocaleLowerCase();
+
+  productRows.textContent = "";
+  if (!nameQuery && !urlQuery) {
+    productEmpty.classList.add("visible");
+    return;
+  }
+
   const filtered = products
     .filter((product) => {
       const matchesName =
@@ -259,7 +295,6 @@ function renderProducts(products: Product[]) {
       return bTime - aTime || a.name.localeCompare(b.name, "zh-CN");
     });
 
-  productRows.textContent = "";
   productEmpty.classList.toggle("visible", filtered.length === 0);
 
   for (const product of filtered) {

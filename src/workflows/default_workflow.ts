@@ -10,6 +10,7 @@
  *   - totalUrls: number
  *   - succeededUrls: number
  *   - failedUrls: number
+ *   - skippedInvalidUrls: number
  *   - updatedProducts: number
  *   - zeroedProducts: number
  *   - errors: array
@@ -97,7 +98,7 @@ function normalizeProducts(rawProducts: RawProduct[], url: string, updatedAt: st
 
   for (const rawProduct of rawProducts) {
     const name = readFirstString(rawProduct, NAME_KEYS);
-    const spec = readFirstString(rawProduct, SPEC_KEYS);
+    const spec = readFirstString(rawProduct, SPEC_KEYS) || '-';
     const price = readFirstNumber(rawProduct, PRICE_KEYS);
     const stock = readFirstNumber(rawProduct, STOCK_KEYS);
 
@@ -163,11 +164,13 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
   const db = initDB(agent);
   const sourceTable = db.table<Source, number>(DB_TABLES.source);
   const productTable = db.table<Product, number>(DB_TABLES.product);
-  const sources = await sourceTable.toArray();
+  const allSources = await sourceTable.toArray();
+  const sources = allSources.filter((source) => source.isInvalid !== true);
   const summary: WorkflowSummary = {
     totalUrls: sources.length,
     succeededUrls: 0,
     failedUrls: 0,
+    skippedInvalidUrls: allSources.length - sources.length,
     updatedProducts: 0,
     zeroedProducts: 0,
     errors: [],
@@ -233,7 +236,7 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
 
   const result: WorkflowResult & { data: WorkflowSummary } = {
     success: summary.failedUrls === 0,
-    message: `Workflow completed: ${summary.succeededUrls}/${summary.totalUrls} URLs succeeded, ${summary.updatedProducts} products updated, ${summary.zeroedProducts} products marked out of stock.`,
+    message: `Workflow completed: ${summary.succeededUrls}/${summary.totalUrls} URLs succeeded, ${summary.skippedInvalidUrls} invalid URLs skipped, ${summary.updatedProducts} products updated, ${summary.zeroedProducts} products marked out of stock.`,
     data: summary,
   };
 
