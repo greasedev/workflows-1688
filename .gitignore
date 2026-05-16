@@ -81,6 +81,7 @@ out
 # Nuxt.js build / generate output
 .nuxt
 dist
+<<<<<<< HEAD
 .output
 
 # Gatsby files
@@ -88,12 +89,23 @@ dist
 # Comment in the public line in if your project uses Gatsby and not Next.js
 # https://nextjs.org/blog/next-9-1#public-directory-support
 # public
+=======
+
+# Gatsby files
+.cache/
+>>>>>>> bfb1286 (feat: 初始化工作流项目基础脚手架与默认代码)
 
 # vuepress build output
 .vuepress/dist
 
+<<<<<<< HEAD
 # vuepress v2.x temp directory
 .temp
+=======
+# vuepress v2.x temp and cache directory
+.temp
+.cache
+>>>>>>> bfb1286 (feat: 初始化工作流项目基础脚手架与默认代码)
 
 # Sveltekit cache directory
 .svelte-kit/
@@ -125,9 +137,12 @@ dist
 # Stores VSCode versions used for testing VSCode extensions
 .vscode-test
 
+<<<<<<< HEAD
 # pnpm
 .pnpm-store
 
+=======
+>>>>>>> bfb1286 (feat: 初始化工作流项目基础脚手架与默认代码)
 # yarn v3
 .pnp.*
 .yarn/*
@@ -137,7 +152,20 @@ dist
 !.yarn/sdks
 !.yarn/versions
 
+<<<<<<< HEAD
 # Vite files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+=======
+# Vite logs files
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Project specific
+.DS_Store
+
+workflows.zip
+.vscode/
+test.js
+>>>>>>> bfb1286 (feat: 初始化工作流项目基础脚手架与默认代码)
