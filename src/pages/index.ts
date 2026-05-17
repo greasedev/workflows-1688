@@ -64,6 +64,7 @@ const nameFilter = getElement<HTMLInputElement>("nameFilter");
 const urlFilter = getElement<HTMLInputElement>("urlFilter");
 const productRows = getElement<HTMLTableSectionElement>("productRows");
 const productEmpty = getElement<HTMLDivElement>("productEmpty");
+const productResultSummary = getElement<HTMLDivElement>("productResultSummary");
 const productPagination = getElement<HTMLDivElement>("productPagination");
 const productPaginationInfo = getElement<HTMLSpanElement>(
   "productPaginationInfo",
@@ -189,6 +190,10 @@ function renderPagination(
   controls.info.textContent = `${start}-${end} / ${totalItems}`;
   controls.prevButton.disabled = state.currentPage <= 1;
   controls.nextButton.disabled = state.currentPage >= totalPages(totalItems);
+}
+
+function updateProductResultSummary(count: number) {
+  productResultSummary.textContent = `已查询到${count}件商品。`;
 }
 
 function hasSourceUrlHeader(sheet: XLSX.WorkSheet): boolean {
@@ -352,11 +357,13 @@ async function renderProductsFromDb() {
 }
 
 function renderProducts(products: Product[]) {
+  productCount.textContent = String(products.length);
   const nameQuery = nameFilter.value.trim().toLocaleLowerCase();
   const urlQuery = urlFilter.value.trim().toLocaleLowerCase();
 
   productRows.textContent = "";
   if (!nameQuery && !urlQuery) {
+    updateProductResultSummary(0);
     productEmpty.classList.add("visible");
     renderPagination(productPaginationControls, productPaginationState, 0);
     return;
@@ -376,6 +383,7 @@ function renderProducts(products: Product[]) {
       return bTime - aTime || a.name.localeCompare(b.name, "zh-CN");
     });
 
+  updateProductResultSummary(filtered.length);
   productEmpty.classList.toggle("visible", filtered.length === 0);
   normalizePage(productPaginationState, filtered.length);
   renderPagination(productPaginationControls, productPaginationState, filtered.length);

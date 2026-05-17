@@ -31,7 +31,7 @@ type SourceProcessResult = Pick<
   'succeededUrls' | 'failedUrls' | 'updatedProducts' | 'zeroedProducts' | 'errors'
 >;
 
-const URL_BATCH_SIZE = 10;
+const URL_BATCH_SIZE = 1;
 const ARRAY_KEYS = ['products', 'skus', 'data', 'items', 'list', 'result'];
 const NAME_KEYS = ['name', 'title', 'productName', 'skuName', '商品名称', '商品名字', '名称'];
 const SPEC_KEYS = ['spec', 'specification', '规格', '商品规格'];
