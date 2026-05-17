@@ -3,6 +3,7 @@ import { Agent } from "@greaseclaw/workflow-sdk";
 export const DB_TABLES = {
   source: "source",
   product: "product",
+  productAlert: "product_alert",
 } as const;
 
 export function initDB(agent: Agent) {
@@ -22,6 +23,11 @@ export function initDB(agent: Agent) {
   db.version(4).stores({
     [DB_TABLES.source]: "++id, &url, isInvalid, updatedAt, lastCheckedAt",
     [DB_TABLES.product]: "++id, &[name+spec+url], name, spec, url, stock, updatedAt",
+  });
+  db.version(5).stores({
+    [DB_TABLES.source]: "++id, &url, isInvalid, updatedAt, lastCheckedAt",
+    [DB_TABLES.product]: "++id, &[name+spec+url], name, spec, url, stock, updatedAt",
+    [DB_TABLES.productAlert]: "++id, url, name, spec, checkedAt, [name+spec+url]",
   });
   return db;
 }

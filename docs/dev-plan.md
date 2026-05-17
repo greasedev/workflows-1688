@@ -2,13 +2,13 @@
 
 ## 1. 当前代码状态
 
-当前仓库已经具备基础工程结构，但业务能力尚未实现：
+当前仓库已经具备商品价格与库存监控的基础业务能力：
 
 - `docs/prd.md` 已定义商品价格与库存监控需求。
-- `src/models/types.ts` 目前只有基础 `Source` 和 `Product` 字段。
-- `src/libs/db.ts` 已定义 Dexie 数据库和 `source`、`product` 两张表，但缺少 PRD 中要求的时间、错误信息等字段索引设计。
-- `src/pages/index.html`、`src/pages/index.ts`、`src/pages/index.css` 当前为空。
-- `src/workflows/default_workflow.ts` 当前是脚手架，只创建了 `Agent` 和 API client，尚未读取 URL 或更新商品。
+- `src/models/types.ts` 已定义 `Source`、`Product`、`ProductAlert` 和工作流摘要类型。
+- `src/libs/db.ts` 已定义 Dexie 数据库和 `source`、`product`、`product_alert` 三张表。
+- `src/pages` 已实现 Excel 导入、URL 监控列表和商品查询页面。
+- `src/workflows/default_workflow.ts` 已实现 URL 批量处理、商品更新、缺失商品库存置零和商品命中记录写入。
 - `src/api.ts` 已生成 `get_sku_list_from_url(product_url)` API client，只允许复用，绝对不能修改。
 
 ## 2. 实施顺序
@@ -22,12 +22,15 @@
 - 更新 `src/models/types.ts`：
   - `Source` 增加 `createdAt`、`updatedAt`、`lastCheckedAt`、`lastError`、`isInvalid`、`invalidAt`。
   - `Product` 增加 `spec`、`updatedAt`。
-  - 如需要，增加工作流结果摘要类型，例如成功 URL 数、失败 URL 数、更新商品数和错误摘要。
+  - 增加 `ProductAlertHitType`，可选值为 `missing`、`price_increase`、`low_stock`。
+  - 增加 `ProductAlert`，字段包括 `url`、`name`、`spec`、`hitTypes`、`previousPrice`、`currentPrice`、`previousStock`、`currentStock`、`stockThreshold`、`checkedAt`。
+  - 增加工作流结果摘要类型，例如成功 URL 数、失败 URL 数、更新商品数、库存置零商品数、命中记录数和错误摘要。
 - 更新 `src/libs/db.ts`：
   - 保留 `source` 表唯一 URL 约束。
   - 为 `source.isInvalid` 增加索引，支持工作流跳过失效 URL。
   - 保留 `product` 表 `[name+spec+url]` 唯一约束。
   - 为 `product.url`、`product.name`、`product.spec` 保留索引，支持 URL 查询、商品名称查询和规格存储。
+  - 新增 `product_alert` 表，索引包含 `url`、`name`、`spec`、`checkedAt`、`[name+spec+url]`。
   - 如 schema 版本需要变更，使用新的 Dexie 版本迁移，避免破坏已有数据；规格字段升级使用 `[name+spec+url]` 约束。
 
 验收点：
@@ -35,6 +38,7 @@
 - 页面和工作流可以引用同一套类型。
 - `source.url` 唯一。
 - `product` 能按 `url` 和 `name` 查询。
+- `product_alert` 能保存追加式商品命中记录，并可按 URL、商品名称、规格和检查时间查询。
 
 ### 2.2 Excel 导入能力
 
@@ -121,7 +125,7 @@ URL 监控列表交互：
 
 - 更新 `src/workflows/default_workflow.ts` frontmatter：
   - 描述该工作流用于更新商品价格和库存。
-  - 输出说明包含成功数、失败数、更新商品数和错误摘要。
+  - 输出说明包含成功数、失败数、更新商品数、库存置零商品数、命中记录数和错误摘要。
 - 实现工作流主逻辑：
   - 初始化 DB。
   - 读取 `source` 表中的所有 URL。
@@ -142,6 +146,17 @@ URL 监控列表交互：
 - 实现缺失商品库存置零：
   - 查询该 URL 下所有历史商品。
   - 历史商品如果本次同名同规格记录未出现，将 `stock` 更新为 `0`，并更新 `updatedAt`。
+- 实现商品命中记录：
+  - 每个 URL 获取到本次商品数据后，先查询该 URL 下所有历史商品。
+  - 使用 `[name+spec+url]` 构建历史商品 Map 和本次商品 Map。
+  - 历史商品本次不存在且历史库存不为 `0` 时，追加 `missing` 命中记录。
+  - 历史商品价格低于本次价格时，追加 `price_increase` 命中记录。
+  - 本次商品库存小于固定阈值 `100` 时，追加 `low_stock` 命中记录；库存等于 `100` 不命中。
+  - 本次 API 返回的新品如果库存小于 `100`，也需要追加 `low_stock` 命中记录。
+  - 同一商品同一轮命中多种情况时，只写入一条 `ProductAlert`，`hitTypes` 保存全部命中类型。
+  - 商品命中记录采用追加模式，不覆盖历史记录。
+  - 商品命中记录只保留 `checkedAt` 一个时间字段。
+  - 新增命中记录、商品 upsert、缺失商品库存置零和成功状态更新应在同一 URL 的处理流程中完成；任一步失败时，该 URL 按失败处理并记录 `lastError`。
 - 更新 URL 检查状态：
   - 成功时更新 `lastCheckedAt`，清空 `lastError`。
   - 失败时更新 `lastCheckedAt` 和 `lastError`。
@@ -152,6 +167,7 @@ URL 监控列表交互：
   - 跳过的失效 URL 数。
   - 更新商品数。
   - 库存置零商品数。
+  - 新增商品命中记录数。
   - 错误摘要。
 
 验收点：
@@ -161,6 +177,8 @@ URL 监控列表交互：
 - API 返回多个商品时能分别写入或更新。
 - 某个 URL 失败不阻断后续 URL。
 - 本次未返回的历史商品库存变为 `0`。
+- 商品缺失、价格上涨和低库存会追加写入 `product_alert`。
+- 同一商品同一轮命中多种情况时，只新增一条命中记录。
 - 工作流返回清晰摘要。
 
 ### 2.5 构建与验证
@@ -192,14 +210,20 @@ URL 监控列表交互：
 - 工作流遇到失效 URL 时跳过，并在摘要中统计跳过数量。
 - 工作流按每批 10 个有效 URL 执行；11 个有效 URL 会先并发处理前 10 个，全部完成后再处理第 11 个。
 - 工作流重新抓取后，缺失商品库存更新为 `0`。
+- 工作流重新抓取后，历史商品本次缺失且历史库存不为 `0` 时，`product_alert` 追加 `missing` 记录。
+- 工作流重新抓取后，历史商品已是 `stock = 0` 且本次仍缺失时，不重复追加 `missing` 记录。
+- 工作流发现历史商品价格低于本次价格时，`product_alert` 追加 `price_increase` 记录。
+- 工作流发现本次商品库存为 `99` 时，`product_alert` 追加 `low_stock` 记录；库存为 `100` 时不追加。
+- 同一商品同时价格上涨且低库存时，`product_alert` 只新增一条记录，`hitTypes` 同时包含 `price_increase` 和 `low_stock`。
+- 重复运行工作流且持续满足命中条件时，`product_alert` 按轮次追加新记录，不覆盖旧记录。
 
 ## 3. 文件级改动清单
 
 预计修改或新增文件：
 
 - `package.json`、`pnpm-lock.yaml`：新增 `xlsx` 依赖。
-- `src/models/types.ts`：扩展 `Source`、`Product` 类型。
-- `src/libs/db.ts`：更新 Dexie schema 和索引。
+- `src/models/types.ts`：扩展 `Source`、`Product` 类型，新增 `ProductAlertHitType`、`ProductAlert` 和工作流命中记录统计字段。
+- `src/libs/db.ts`：更新 Dexie schema 和索引，新增 `product_alert` 表。
 - `src/pages/index.html`：新增页面结构。
 - `src/pages/index.ts`：实现 Excel 导入、URL 列表、商品查询和交互逻辑。
 - `src/pages/index.css`：实现页面样式。
@@ -216,6 +240,7 @@ URL 监控列表交互：
 - IndexedDB schema 升级：如果已有用户数据，使用 Dexie 新版本迁移，不删除旧表数据。
 - 大量 URL 导致页面卡顿：URL 监控列表和商品查询结果均按每页 20 条分页；商品查询仍按本地查询实现。
 - 商品名称或规格变更导致重复记录：首版按 PRD 使用 `[name+spec+url]` 唯一判断，不额外引入 SKU ID 推断。
+- 商品命中记录增长较快：当前按业务要求采用追加模式；后续如果需要页面展示或清理策略，再增加查询分页和保留周期能力。
 
 ## 5. 完成定义
 
@@ -224,6 +249,7 @@ URL 监控列表交互：
 - 页面能完成 Excel 导入、URL 列表展示、商品名称查询、URL 查询和 URL 列表点击交互。
 - 工作流能批量更新商品价格和库存。
 - 缺失商品库存置 `0` 的规则已实现。
+- 商品缺失、价格上涨和低库存命中记录已写入 `product_alert`。
 - `src/api.ts` 未发生任何修改。
 - `pnpm run build:pages` 通过。
 - `pnpm run build` 通过。

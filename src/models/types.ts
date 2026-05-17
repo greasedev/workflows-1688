@@ -19,6 +19,22 @@ export interface Product {
   updatedAt?: string; // 最近一次更新商品信息的时间
 }
 
+export type ProductAlertHitType = 'missing' | 'price_increase' | 'low_stock';
+
+export interface ProductAlert {
+  id?: number; // 数据库自增主键（可选，仅在数据库记录中存在）
+  url: string; // 商品所在URL
+  name: string; // 商品名称
+  spec: string; // 商品规格
+  hitTypes: ProductAlertHitType[]; // 本次命中的异常类型
+  previousPrice?: number; // 数据库中原价格
+  currentPrice?: number; // 本次获取到的新价格
+  previousStock?: number; // 数据库中原库存
+  currentStock?: number; // 本次获取到的新库存
+  stockThreshold: number; // 低库存阈值
+  checkedAt: string; // 本次工作流检查时间
+}
+
 export interface WorkflowSummary {
   totalUrls: number;
   succeededUrls: number;
@@ -26,6 +42,7 @@ export interface WorkflowSummary {
   skippedInvalidUrls: number;
   updatedProducts: number;
   zeroedProducts: number;
+  alertRecordsCreated: number;
   errors: Array<{
     url: string;
     message: string;
