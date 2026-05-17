@@ -5,8 +5,8 @@
 当前仓库已经具备商品价格与库存监控的基础业务能力：
 
 - `docs/prd.md` 已定义商品价格与库存监控需求。
-- `src/models/types.ts` 已定义 `Source`、`Product`、`ProductAlert` 和工作流摘要类型。
-- `src/libs/db.ts` 已定义 Dexie 数据库和 `source`、`product`、`product_alert` 三张表。
+- `src/models/types.ts` 已定义 `Source`、`Product`、`ProductAlert`、`AppSettings` 和工作流摘要类型。
+- `src/libs/db.ts` 已定义 Dexie 数据库和 `source`、`product`、`product_alert`、`settings` 表。
 - `src/pages` 已实现监控报警、Excel 导入、URL 监控列表和商品查询页面。
 - `src/workflows/default_workflow.ts` 已实现 URL 批量处理、商品更新、缺失商品库存置零和商品命中记录写入。
 - `src/api.ts` 已生成 `get_sku_list_from_url(product_url)` API client，只允许复用，绝对不能修改。
@@ -24,6 +24,7 @@
   - `Product` 增加 `spec`、`updatedAt`。
   - 增加 `ProductAlertHitType`，可选值为 `missing`、`price_increase`、`low_stock`。
   - 增加 `ProductAlert`，字段包括 `url`、`name`、`spec`、`hitTypes`、`previousPrice`、`currentPrice`、`previousStock`、`currentStock`、`stockThreshold`、`checkedAt`。
+  - 增加 `AppSettings`，字段包括 `id`、`monitorMaxConcurrency`、`stockAlertThreshold`、`updatedAt`。
   - 增加工作流结果摘要类型，例如成功 URL 数、失败 URL 数、更新商品数、库存置零商品数、命中记录数和错误摘要。
 - 更新 `src/libs/db.ts`：
   - 保留 `source` 表唯一 URL 约束。
@@ -31,7 +32,13 @@
   - 保留 `product` 表 `[name+spec+url]` 唯一约束。
   - 为 `product.url`、`product.name`、`product.spec` 保留索引，支持 URL 查询、商品名称查询和规格存储。
   - 新增 `product_alert` 表，索引包含 `url`、`name`、`spec`、`checkedAt`、`[name+spec+url]`。
+  - 新增 `settings` 表，使用 `id = global` 保存唯一全局设置记录，索引为 `&id, updatedAt`。
   - 如 schema 版本需要变更，使用新的 Dexie 版本迁移，避免破坏已有数据；规格字段升级使用 `[name+spec+url]` 约束。
+- 新增共享设置 helper：
+  - 默认值为 `monitorMaxConcurrency = 1`、`stockAlertThreshold = 100`。
+  - `monitorMaxConcurrency` 校验范围为 `1-50`。
+  - `stockAlertThreshold` 必须为大于等于 `1` 的整数。
+  - 页面和 workflow 均通过 helper 读取设置，首次缺失时写入默认设置。
 
 验收点：
 
@@ -39,6 +46,7 @@
 - `source.url` 唯一。
 - `product` 能按 `url` 和 `name` 查询。
 - `product_alert` 能保存追加式商品命中记录，并可按 URL、商品名称、规格和检查时间查询。
+- `settings` 能保存并读取页面和工作流共享的全局参数。
 
 ### 2.2 Excel 导入能力
 
@@ -101,9 +109,14 @@
 - 来源 URL 可点击打开原始页面。
 - 商品查询搜索栏只在 `商品查询` tab 下显示。
 - 在 `导入URL` 按钮旁提供 `生成测试报警` 按钮。
+- 在 `导入URL` 按钮右侧提供 `设置` 按钮。
+- 设置弹窗参考 `demo` 的设置界面结构和样式，包含 `监控最大并发数` 和 `库存预警值` 两个数字输入。
+- 打开设置弹窗时读取 `settings` 表；保存时写入全局设置记录。
+- 设置保存校验：并发数为 `1-50`，库存预警值为大于等于 `1` 的整数。
 - 点击 `生成测试报警` 时读取 `Product` 表；如果没有商品，弹窗提示 `暂无商品数据，无法生成测试报警。`，不修改 `product_alert`。
 - 如果存在商品，先清空 `product_alert` 表，再按已有商品循环构造 20 条 `ProductAlert` 测试数据。
 - 测试数据的命中类型按固定模式循环：`missing`、`price_increase`、`low_stock`、`price_increase + low_stock`。
+- 测试数据的 `stockThreshold` 和低库存样例值从数据库中的 `库存预警值` 生成，不使用页面硬编码阈值。
 - 测试数据的 `checkedAt` 从当前时间开始向前递减生成，保证列表按时间倒序稳定展示。
 - 点击生成完成后切换到 `监控报警` tab，回到第 1 页并刷新报警总数和列表。
 
@@ -136,6 +149,8 @@ URL 监控列表交互：
 - 监控报警列表按检查时间倒序展示。
 - 监控报警列表超过 20 条时可以通过上一页、下一页分页查看。
 - 点击 `生成测试报警` 能基于 `Product` 表生成 20 条报警测试数据。
+- 点击 `设置` 能打开参数设置弹窗；保存后刷新页面仍能读取保存值。
+- `index.ts` 中生成测试报警不保留业务使用的 `LOW_STOCK_THRESHOLD` 硬编码。
 - `Product` 表为空时，点击 `生成测试报警` 只显示错误提示，不清空或写入报警。
 - URL 列表能显示 URL 和商品数。
 - URL 列表超过 20 条时可以通过上一页、下一页分页查看。
@@ -159,7 +174,8 @@ URL 监控列表交互：
   - 初始化 DB。
   - 读取 `source` 表中的所有 URL。
   - 跳过 `isInvalid === true` 的失效 URL，不调用提取 API。
-  - 将有效 URL 按每批 10 个切分。
+  - 读取 `settings` 表中的全局设置。
+  - 将有效 URL 按 `monitorMaxConcurrency` 切分。
   - 批次之间串行执行，批次内使用 `Promise.all` 并发调用 `apis.get_sku_list_from_url(url)`。
   - 单个 URL 失败时记录错误并继续下一个 URL。
 - 实现 API 结果解析：
@@ -180,8 +196,8 @@ URL 监控列表交互：
   - 使用 `[name+spec+url]` 构建历史商品 Map 和本次商品 Map。
   - 历史商品本次不存在且历史库存不为 `0` 时，追加 `missing` 命中记录。
   - 历史商品价格低于本次价格时，追加 `price_increase` 命中记录。
-  - 本次商品库存小于固定阈值 `100` 时，追加 `low_stock` 命中记录；库存等于 `100` 不命中。
-  - 本次 API 返回的新品如果库存小于 `100`，也需要追加 `low_stock` 命中记录。
+  - 本次商品库存小于 `stockAlertThreshold` 时，追加 `low_stock` 命中记录；库存等于阈值不命中。
+  - 本次 API 返回的新品如果库存小于 `stockAlertThreshold`，也需要追加 `low_stock` 命中记录。
   - 同一商品同一轮命中多种情况时，只写入一条 `ProductAlert`，`hitTypes` 保存全部命中类型。
   - 商品命中记录采用追加模式，不覆盖历史记录。
   - 商品命中记录只保留 `checkedAt` 一个时间字段。
@@ -202,7 +218,7 @@ URL 监控列表交互：
 验收点：
 
 - 工作流能遍历所有 `source` URL。
-- 工作流每批最多处理 10 个有效 URL，当前批次全部完成后再执行下一批。
+- 工作流每批最多处理 `monitorMaxConcurrency` 个有效 URL，当前批次全部完成后再执行下一批。
 - API 返回多个商品时能分别写入或更新。
 - 某个 URL 失败不阻断后续 URL。
 - 本次未返回的历史商品库存变为 `0`。
@@ -245,16 +261,20 @@ URL 监控列表交互：
 - 输入 URL 查询对应商品。
 - 同时输入商品名称和 URL，确认使用组合过滤。
 - 商品查询列表价格列显示人民币标识 `¥`，库存列不显示币种。
+- 设置弹窗首次打开显示默认值：并发数 `1`，库存预警值 `100`。
+- 设置弹窗保存后刷新页面仍显示保存值。
+- 设置弹窗拒绝并发数 `<1`、`>50` 或库存预警值 `<1` 的输入。
+- 修改库存预警值后生成测试报警，新报警的 `stockThreshold` 使用保存后的值，低库存样例小于该值。
 - 商品查询搜索栏左侧文案随筛选条件变化更新；清空筛选后显示 `已查询到0件商品。`。
 - 商品查询结果每页展示 20 条；筛选条件变化后回到第 1 页。
 - 工作流处理多个 URL，其中一个失败时整体继续执行。
 - 工作流遇到失效 URL 时跳过，并在摘要中统计跳过数量。
-- 工作流按每批 10 个有效 URL 执行；11 个有效 URL 会先并发处理前 10 个，全部完成后再处理第 11 个。
+- 工作流按数据库中的 `monitorMaxConcurrency` 执行；并发数为 `1` 时逐个处理，并发数为 `N` 时每批最多处理 `N` 个有效 URL。
 - 工作流重新抓取后，缺失商品库存更新为 `0`。
 - 工作流重新抓取后，历史商品本次缺失且历史库存不为 `0` 时，`product_alert` 追加 `missing` 记录。
 - 工作流重新抓取后，历史商品已是 `stock = 0` 且本次仍缺失时，不重复追加 `missing` 记录。
 - 工作流发现历史商品价格低于本次价格时，`product_alert` 追加 `price_increase` 记录。
-- 工作流发现本次商品库存为 `99` 时，`product_alert` 追加 `low_stock` 记录；库存为 `100` 时不追加。
+- 工作流发现本次商品库存小于数据库中的 `stockAlertThreshold` 时，`product_alert` 追加 `low_stock` 记录；库存等于阈值时不追加。
 - 同一商品同时价格上涨且低库存时，`product_alert` 只新增一条记录，`hitTypes` 同时包含 `price_increase` 和 `low_stock`。
 - 重复运行工作流且持续满足命中条件时，`product_alert` 按轮次追加新记录，不覆盖旧记录。
 

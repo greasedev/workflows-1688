@@ -1,7 +1,12 @@
 import { Agent, AgentOptions } from "@greaseclaw/workflow-sdk";
 import * as XLSX from "xlsx";
 import { DB_TABLES, initDB } from "../libs/db";
-import type { Product, ProductAlert, ProductAlertHitType, Source } from "../models/types";
+import {
+  getAppSettings,
+  saveAppSettings,
+  SETTINGS_LIMITS,
+} from "../libs/settings";
+import type { AppSettings, Product, ProductAlert, ProductAlertHitType, Source } from "../models/types";
 
 type ImportStats = {
   added: number;
@@ -23,7 +28,6 @@ type PaginationControls = {
 const SOURCE_URL_COLUMN = "上游1";
 const PAGE_SIZE = 20;
 const TEST_ALERT_COUNT = 20;
-const LOW_STOCK_THRESHOLD = 100;
 const alertPaginationState: PaginationState = { currentPage: 1 };
 const sourcePaginationState: PaginationState = { currentPage: 1 };
 const productPaginationState: PaginationState = { currentPage: 1 };
@@ -51,17 +55,31 @@ const db = initDB(agent);
 const sourceTable = db.table<Source, number>(DB_TABLES.source);
 const productTable = db.table<Product, number>(DB_TABLES.product);
 const productAlertTable = db.table<ProductAlert, number>(DB_TABLES.productAlert);
+const settingsTable = db.table<AppSettings, string>(DB_TABLES.settings);
 
 const generateTestAlertsButton = getElement<HTMLButtonElement>(
   "generateTestAlertsButton",
 );
 const excelInput = getElement<HTMLInputElement>("excelInput");
+const settingsButton = getElement<HTMLButtonElement>("settingsButton");
 const importModal = getElement<HTMLDivElement>("importModal");
 const importModalTitle = getElement<HTMLDivElement>("importModalTitle");
 const importModalBody = getElement<HTMLDivElement>("importModalBody");
 const importModalCloseButton = getElement<HTMLButtonElement>(
   "importModalCloseButton",
 );
+const settingsModal = getElement<HTMLDivElement>("settingsModal");
+const settingsForm = getElement<HTMLFormElement>("settingsForm");
+const settingsCancelButton = getElement<HTMLButtonElement>(
+  "settingsCancelButton",
+);
+const monitorMaxConcurrencyInput = getElement<HTMLInputElement>(
+  "monitorMaxConcurrencyInput",
+);
+const stockAlertThresholdInput = getElement<HTMLInputElement>(
+  "stockAlertThresholdInput",
+);
+const settingsError = getElement<HTMLDivElement>("settingsError");
 const alertTab = getElement<HTMLButtonElement>("alertTab");
 const sourceTab = getElement<HTMLButtonElement>("sourceTab");
 const productTab = getElement<HTMLButtonElement>("productTab");
@@ -149,6 +167,24 @@ function closeImportModal() {
   importModal.classList.remove("active");
 }
 
+async function openSettingsModal() {
+  const settings = await getAppSettings(settingsTable);
+  monitorMaxConcurrencyInput.value = String(settings.monitorMaxConcurrency);
+  stockAlertThresholdInput.value = String(settings.stockAlertThreshold);
+  settingsError.hidden = true;
+  settingsError.textContent = "";
+  settingsModal.classList.add("active");
+}
+
+function closeSettingsModal() {
+  settingsModal.classList.remove("active");
+}
+
+function showSettingsError(message: string) {
+  settingsError.textContent = message;
+  settingsError.hidden = false;
+}
+
 function setActivePanel(panel: ActivePanel) {
   const isAlert = panel === "alert";
   const isSource = panel === "source";
@@ -164,6 +200,48 @@ function setActivePanel(panel: ActivePanel) {
   sourceTab.setAttribute("aria-selected", String(isSource));
   productTab.classList.toggle("active", isProduct);
   productTab.setAttribute("aria-selected", String(isProduct));
+}
+
+function parseIntegerInput(input: HTMLInputElement, label: string): number {
+  const value = Number(input.value);
+  if (!Number.isInteger(value)) {
+    throw new Error(`${label}必须是整数。`);
+  }
+  return value;
+}
+
+function parseSettingsForm(): Pick<
+  AppSettings,
+  "monitorMaxConcurrency" | "stockAlertThreshold"
+> {
+  const monitorMaxConcurrency = parseIntegerInput(
+    monitorMaxConcurrencyInput,
+    "监控最大并发数",
+  );
+  const stockAlertThreshold = parseIntegerInput(
+    stockAlertThresholdInput,
+    "库存预警值",
+  );
+
+  if (
+    monitorMaxConcurrency < SETTINGS_LIMITS.monitorMaxConcurrency.min ||
+    monitorMaxConcurrency > SETTINGS_LIMITS.monitorMaxConcurrency.max
+  ) {
+    throw new Error(
+      `监控最大并发数必须在 ${SETTINGS_LIMITS.monitorMaxConcurrency.min}-${SETTINGS_LIMITS.monitorMaxConcurrency.max} 之间。`,
+    );
+  }
+
+  if (stockAlertThreshold < SETTINGS_LIMITS.stockAlertThreshold.min) {
+    throw new Error(
+      `库存预警值必须大于等于 ${SETTINGS_LIMITS.stockAlertThreshold.min}。`,
+    );
+  }
+
+  return {
+    monitorMaxConcurrency,
+    stockAlertThreshold,
+  };
 }
 
 function normalizeUrl(value: unknown): string | null {
@@ -330,11 +408,16 @@ function lowerTestPrice(price: number): number {
   return Number((price - Math.max(1, price * 0.1)).toFixed(2));
 }
 
-function lowTestStock(index: number): number {
-  return 20 + (index % 70);
+function lowTestStock(index: number, stockAlertThreshold: number): number {
+  return Math.max(0, stockAlertThreshold - 1 - (index % 30));
 }
 
-function buildTestAlert(product: Product, hitTypes: ProductAlertHitType[], index: number): ProductAlert {
+function buildTestAlert(
+  product: Product,
+  hitTypes: ProductAlertHitType[],
+  index: number,
+  stockAlertThreshold: number,
+): ProductAlert {
   const checkedAt = new Date(Date.now() - index * 60 * 1000).toISOString();
   const alert: ProductAlert = {
     url: product.url,
@@ -345,7 +428,7 @@ function buildTestAlert(product: Product, hitTypes: ProductAlertHitType[], index
     currentPrice: product.price,
     previousStock: product.stock,
     currentStock: product.stock,
-    stockThreshold: LOW_STOCK_THRESHOLD,
+    stockThreshold: stockAlertThreshold,
     checkedAt,
   };
 
@@ -361,7 +444,7 @@ function buildTestAlert(product: Product, hitTypes: ProductAlertHitType[], index
 
   if (hitTypes.includes("low_stock")) {
     alert.previousStock = product.stock;
-    alert.currentStock = lowTestStock(index);
+    alert.currentStock = lowTestStock(index, stockAlertThreshold);
   }
 
   return alert;
@@ -374,11 +457,12 @@ async function generateTestAlerts() {
     return;
   }
 
+  const settings = await getAppSettings(settingsTable);
   const alerts: ProductAlert[] = [];
   for (let index = 0; index < TEST_ALERT_COUNT; index += 1) {
     const product = products[index % products.length];
     const hitTypes = TEST_ALERT_PATTERNS[index % TEST_ALERT_PATTERNS.length];
-    alerts.push(buildTestAlert(product, hitTypes, index));
+    alerts.push(buildTestAlert(product, hitTypes, index, settings.stockAlertThreshold));
   }
 
   await productAlertTable.clear();
@@ -667,9 +751,49 @@ importModal.addEventListener("click", (event) => {
   }
 });
 
+settingsButton.addEventListener("click", async () => {
+  settingsButton.disabled = true;
+  try {
+    await openSettingsModal();
+  } catch (error) {
+    showImportModal(
+      "设置加载失败",
+      error instanceof Error ? error.message : "设置加载失败。",
+      "error",
+    );
+  } finally {
+    settingsButton.disabled = false;
+  }
+});
+
+settingsCancelButton.addEventListener("click", () => {
+  closeSettingsModal();
+});
+
+settingsModal.addEventListener("click", (event) => {
+  if (event.target === settingsModal) {
+    closeSettingsModal();
+  }
+});
+
+settingsForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    settingsError.hidden = true;
+    settingsError.textContent = "";
+    const settings = parseSettingsForm();
+    await saveAppSettings(settingsTable, settings);
+    closeSettingsModal();
+    showImportModal("设置已保存", "参数设置已保存。", "success");
+  } catch (error) {
+    showSettingsError(error instanceof Error ? error.message : "保存设置失败。");
+  }
+});
+
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     closeImportModal();
+    closeSettingsModal();
   }
 });
 

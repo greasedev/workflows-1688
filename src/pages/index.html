@@ -59,6 +59,9 @@
             <input id="excelInput" type="file" accept=".xlsx,.xls,.csv" />
             <span>导入URL</span>
           </label>
+          <button class="btn btn-secondary settings-entry-btn" id="settingsButton" type="button">
+            设置
+          </button>
         </div>
       </div>
 
@@ -166,6 +169,56 @@
         <div class="modal-actions">
           <button class="btn btn-primary" id="importModalCloseButton" type="button">确认</button>
         </div>
+      </div>
+    </div>
+
+    <div class="modal" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
+      <div class="modal-content settings-modal-content">
+        <div class="settings-modal-header">
+          <div>
+            <div class="modal-title" id="settingsModalTitle">设置</div>
+            <div class="settings-modal-subtitle">配置监控任务并发数和库存预警阈值</div>
+          </div>
+        </div>
+        <form class="settings-form" id="settingsForm">
+          <div class="settings-section">
+            <div class="settings-section-title">监控参数</div>
+            <div class="settings-row">
+              <label class="settings-label" for="monitorMaxConcurrencyInput">监控最大并发数</label>
+              <div class="settings-control">
+                <input
+                  class="settings-input settings-count-input"
+                  id="monitorMaxConcurrencyInput"
+                  name="monitorMaxConcurrency"
+                  type="number"
+                  min="1"
+                  max="50"
+                  step="1"
+                  required
+                />
+              </div>
+            </div>
+            <div class="settings-row">
+              <label class="settings-label" for="stockAlertThresholdInput">库存预警值</label>
+              <div class="settings-control">
+                <input
+                  class="settings-input settings-count-input"
+                  id="stockAlertThresholdInput"
+                  name="stockAlertThreshold"
+                  type="number"
+                  min="1"
+                  step="1"
+                  required
+                />
+              </div>
+            </div>
+          </div>
+          <div class="settings-error" id="settingsError" hidden></div>
+          <div class="modal-actions">
+            <button class="btn btn-secondary" id="settingsCancelButton" type="button">取消</button>
+            <button class="btn btn-primary" type="submit">保存</button>
+          </div>
+        </form>
       </div>
     </div>
 

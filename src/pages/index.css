@@ -167,7 +167,8 @@ input {
   color: white;
 }
 
-.btn {
+.btn,
+.count-button {
   padding: 8px 16px;
   border: none;
   border-radius: var(--radius-sm);
@@ -178,14 +179,16 @@ input {
     background 0.2s,
     color 0.2s,
     box-shadow 0.2s;
-}
-
-.btn-primary {
-  background: var(--primary);
   color: white;
 }
 
-.btn-primary:hover {
+.btn-primary,
+.count-button {
+  background: var(--primary);
+}
+
+.btn-primary:hover,
+.count-button:hover {
   background: var(--primary-hover);
 }
 
@@ -196,6 +199,22 @@ input {
 
 .btn-secondary:hover {
   background: #e4e7eb;
+}
+
+.settings-entry-btn,
+.settings-entry-btn:hover {
+  color: white;
+}
+
+.settings-entry-btn {
+  flex: 0 0 auto;
+  background: var(--accent);
+  font-weight: 500;
+  box-shadow: 0 2px 8px rgba(47, 111, 237, 0.22);
+}
+
+.settings-entry-btn:hover {
+  background: var(--accent-hover);
 }
 
 .file-import-btn {
@@ -254,7 +273,8 @@ input {
   min-width: 0;
 }
 
-.barcode-search-input {
+.barcode-search-input,
+.settings-input {
   width: 100%;
   height: 36px;
   padding: 0 12px;
@@ -268,10 +288,19 @@ input {
     box-shadow 0.2s;
 }
 
-.barcode-search-input:focus {
+.settings-input {
+  height: 38px;
+}
+
+.barcode-search-input:focus,
+.settings-input:focus {
   border-color: var(--accent);
   box-shadow: var(--focus-ring);
   outline: none;
+}
+
+.settings-input:hover {
+  border-color: #aeb7c7;
 }
 
 .table-container {
@@ -332,21 +361,6 @@ tr:last-child td {
   text-decoration: underline;
 }
 
-.count-button {
-  padding: 8px 16px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: var(--primary);
-  color: white;
-  cursor: pointer;
-  font-size: 13px;
-  white-space: nowrap;
-}
-
-.count-button:hover {
-  background: var(--primary-hover);
-}
-
 .status-ok {
   color: var(--success);
 }
@@ -374,12 +388,6 @@ tr:last-child td {
 }
 
 .product-spec {
-  margin-top: 2px;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.product-url {
   margin-top: 2px;
   color: var(--text-muted);
   font-size: 12px;
@@ -485,6 +493,14 @@ tr:last-child td {
   box-shadow: var(--shadow-modal);
 }
 
+.settings-modal-content {
+  width: min(100%, 640px);
+  max-width: 640px;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  padding: 0;
+}
+
 .modal-title {
   margin-bottom: 16px;
   color: var(--text-primary);
@@ -513,6 +529,78 @@ tr:last-child td {
   gap: 12px;
 }
 
+.settings-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 24px 28px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-modal-header .modal-title {
+  margin-bottom: 4px;
+}
+
+.settings-modal-subtitle {
+  color: #7a8494;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.settings-form,
+.settings-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-form {
+  gap: 20px;
+  padding: 22px 28px 24px;
+}
+
+.settings-section {
+  gap: 12px;
+}
+
+.settings-section-title {
+  color: #1f2937;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.settings-row {
+  display: grid;
+  grid-template-columns: minmax(170px, 1fr) minmax(240px, 300px);
+  align-items: center;
+  gap: 18px;
+  min-height: 44px;
+}
+
+.settings-label {
+  color: #374151;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.settings-count-input {
+  max-width: 160px;
+}
+
+.settings-error {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(231, 76, 60, 0.08);
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.settings-form .modal-actions {
+  margin-top: 2px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
 @media (max-width: 768px) {
   .list-toolbar,
   .barcode-search-panel {
@@ -535,6 +623,8 @@ tr:last-child td {
 
   .toolbar-actions {
     align-self: flex-end;
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 
   .barcode-search-actions {
@@ -549,10 +639,6 @@ tr:last-child td {
 
   .barcode-search-field {
     flex: 1 1 auto;
-  }
-
-  .barcode-search-input {
-    width: 100%;
   }
 
   table {
@@ -581,5 +667,22 @@ tr:last-child td {
 
   .modal {
     align-items: flex-start;
+  }
+
+  .settings-modal-header {
+    padding: 20px 20px 14px;
+  }
+
+  .settings-form {
+    padding: 18px 20px 20px;
+  }
+
+  .settings-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .settings-count-input {
+    max-width: none;
   }
 }

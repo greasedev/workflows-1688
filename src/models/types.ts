@@ -35,6 +35,13 @@ export interface ProductAlert {
   checkedAt: string; // 本次工作流检查时间
 }
 
+export interface AppSettings {
+  id: 'global'; // 全局设置记录固定主键
+  monitorMaxConcurrency: number; // 监控 URL 最大并发数
+  stockAlertThreshold: number; // 库存预警阈值
+  updatedAt: string; // 最近一次设置更新时间
+}
+
 export interface WorkflowSummary {
   totalUrls: number;
   succeededUrls: number;

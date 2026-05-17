@@ -21,20 +21,20 @@
 import { Agent, type Dexie, type WorkflowContext, type WorkflowResult } from '@greaseclaw/workflow-sdk';
 import { createWorkflowApis, type ExecutionResult } from '../api';
 import { DB_TABLES, initDB } from '../libs/db';
-import type { Product, ProductAlert, ProductAlertHitType, Source, WorkflowSummary } from '../models/types';
+import { getAppSettings } from '../libs/settings';
+import type { AppSettings, Product, ProductAlert, ProductAlertHitType, Source, WorkflowSummary } from '../models/types';
 
 type RawProduct = Record<string, unknown>;
 type WorkflowApis = ReturnType<typeof createWorkflowApis>;
 type ProductTable = Dexie.Table<Product, number>;
 type ProductAlertTable = Dexie.Table<ProductAlert, number>;
 type SourceTable = Dexie.Table<Source, number>;
+type SettingsTable = Dexie.Table<AppSettings, string>;
 type SourceProcessResult = Pick<
   WorkflowSummary,
   'succeededUrls' | 'failedUrls' | 'updatedProducts' | 'zeroedProducts' | 'alertRecordsCreated' | 'errors'
 >;
 
-const URL_BATCH_SIZE = 1;
-const LOW_STOCK_THRESHOLD = 100;
 const ARRAY_KEYS = ['products', 'skus', 'data', 'items', 'list', 'result'];
 const NAME_KEYS = ['name', 'title', 'productName', 'skuName', '商品名称', '商品名字', '名称'];
 const SPEC_KEYS = ['spec', 'specification', '规格', '商品规格'];
@@ -142,6 +142,7 @@ function createProductAlert(
   product: Pick<Product, 'name' | 'spec' | 'url'>,
   hitTypes: ProductAlertHitType[],
   checkedAt: string,
+  stockAlertThreshold: number,
   values: Pick<
     ProductAlert,
     'previousPrice' | 'currentPrice' | 'previousStock' | 'currentStock'
@@ -152,7 +153,7 @@ function createProductAlert(
     name: product.name,
     spec: product.spec,
     hitTypes,
-    stockThreshold: LOW_STOCK_THRESHOLD,
+    stockThreshold: stockAlertThreshold,
     checkedAt,
     ...values,
   };
@@ -162,6 +163,7 @@ function buildProductAlerts(
   existingProducts: Product[],
   currentProducts: Product[],
   checkedAt: string,
+  stockAlertThreshold: number,
 ): ProductAlert[] {
   const alerts: ProductAlert[] = [];
   const existingByKey = buildProductMap(existingProducts);
@@ -174,14 +176,14 @@ function buildProductAlerts(
     if (existingProduct && existingProduct.price < currentProduct.price) {
       hitTypes.push('price_increase');
     }
-    if (currentProduct.stock < LOW_STOCK_THRESHOLD) {
+    if (currentProduct.stock < stockAlertThreshold) {
       hitTypes.push('low_stock');
     }
     if (hitTypes.length === 0) {
       continue;
     }
 
-    alerts.push(createProductAlert(currentProduct, hitTypes, checkedAt, {
+    alerts.push(createProductAlert(currentProduct, hitTypes, checkedAt, stockAlertThreshold, {
       previousPrice: existingProduct?.price,
       currentPrice: currentProduct.price,
       previousStock: existingProduct?.stock,
@@ -194,7 +196,7 @@ function buildProductAlerts(
       continue;
     }
 
-    alerts.push(createProductAlert(existingProduct, ['missing'], checkedAt, {
+    alerts.push(createProductAlert(existingProduct, ['missing'], checkedAt, stockAlertThreshold, {
       previousPrice: existingProduct.price,
       previousStock: existingProduct.stock,
     }));
@@ -272,6 +274,7 @@ async function processSource(
   sourceTable: SourceTable,
   productTable: ProductTable,
   productAlertTable: ProductAlertTable,
+  stockAlertThreshold: number,
 ): Promise<SourceProcessResult> {
   const checkedAt = new Date().toISOString();
   const resultSummary = emptySourceProcessResult();
@@ -288,7 +291,7 @@ async function processSource(
       };
       const existingProducts = await productTable.where('url').equals(source.url).toArray() as Product[];
       const currentProductKeys = new Set(products.map(productKey));
-      const alerts = buildProductAlerts(existingProducts, products, checkedAt);
+      const alerts = buildProductAlerts(existingProducts, products, checkedAt, stockAlertThreshold);
 
       if (alerts.length > 0) {
         await productAlertTable.bulkAdd(alerts);
@@ -363,6 +366,8 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
   const sourceTable = db.table<Source, number>(DB_TABLES.source);
   const productTable = db.table<Product, number>(DB_TABLES.product);
   const productAlertTable = db.table<ProductAlert, number>(DB_TABLES.productAlert);
+  const settingsTable: SettingsTable = db.table<AppSettings, string>(DB_TABLES.settings);
+  const settings = await getAppSettings(settingsTable);
   const allSources = await sourceTable.toArray();
   const sources = allSources.filter((source) => source.isInvalid !== true);
   const summary: WorkflowSummary = {
@@ -380,10 +385,18 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
   console.log("Params:", context.params);
   console.log('Executing product monitor workflow...');
 
-  const batches = chunkSources(sources, URL_BATCH_SIZE);
+  const batches = chunkSources(sources, settings.monitorMaxConcurrency);
   for (const batch of batches) {
     const batchResults = await Promise.all(
-      batch.map((source) => processSource(source, apis, db, sourceTable, productTable, productAlertTable)),
+      batch.map((source) => processSource(
+        source,
+        apis,
+        db,
+        sourceTable,
+        productTable,
+        productAlertTable,
+        settings.stockAlertThreshold,
+      )),
     );
     for (const batchResult of batchResults) {
       applyProcessResult(summary, batchResult);
@@ -392,7 +405,7 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
 
   const result: WorkflowResult & { data: WorkflowSummary } = {
     success: summary.failedUrls === 0,
-    message: `Workflow completed in ${batches.length} batches of up to ${URL_BATCH_SIZE}: ${summary.succeededUrls}/${summary.totalUrls} URLs succeeded, ${summary.skippedInvalidUrls} invalid URLs skipped, ${summary.updatedProducts} products updated, ${summary.zeroedProducts} products marked out of stock, ${summary.alertRecordsCreated} alert records created.`,
+    message: `Workflow completed in ${batches.length} batches of up to ${settings.monitorMaxConcurrency}: ${summary.succeededUrls}/${summary.totalUrls} URLs succeeded, ${summary.skippedInvalidUrls} invalid URLs skipped, ${summary.updatedProducts} products updated, ${summary.zeroedProducts} products marked out of stock, ${summary.alertRecordsCreated} alert records created.`,
     data: summary,
   };
 
