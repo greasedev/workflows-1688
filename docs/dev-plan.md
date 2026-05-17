@@ -7,7 +7,7 @@
 - `docs/prd.md` 已定义商品价格与库存监控需求。
 - `src/models/types.ts` 已定义 `Source`、`Product`、`ProductAlert` 和工作流摘要类型。
 - `src/libs/db.ts` 已定义 Dexie 数据库和 `source`、`product`、`product_alert` 三张表。
-- `src/pages` 已实现 Excel 导入、URL 监控列表和商品查询页面。
+- `src/pages` 已实现监控报警、Excel 导入、URL 监控列表和商品查询页面。
 - `src/workflows/default_workflow.ts` 已实现 URL 批量处理、商品更新、缺失商品库存置零和商品命中记录写入。
 - `src/api.ts` 已生成 `get_sku_list_from_url(product_url)` API client，只允许复用，绝对不能修改。
 
@@ -71,6 +71,7 @@
 开发任务：
 
 - 在 `src/pages/index.html` 中搭建页面结构：
+  - 监控报警列表区域。
   - Excel 上传区域。
   - 导入结果提示区域。
   - URL 监控列表区域。
@@ -81,9 +82,23 @@
   - 商品表格在窄屏下保持可读。
 - 在 `src/pages/index.ts` 中实现页面数据加载：
   - 初始化 `Agent` 和 DB。
+  - 加载 `ProductAlert` 列表。
   - 加载 URL 列表。
   - 按 URL 聚合商品数。
   - 加载商品查询结果。
+
+监控报警列表交互：
+
+- tab 顺序固定为 `监控报警`、`URL监控`、`商品查询`。
+- 页面默认展示 `监控报警` tab，并在 tab 数字中展示当前报警总数。
+- 监控报警列表读取 `product_alert` 表，并按 `checkedAt` 倒序展示；时间相同时按 `id` 倒序展示。
+- 监控报警列表每页展示 20 条记录，分页只影响展示层。
+- 每行展示商品名称、规格、命中类型、价格变化、库存变化、来源 URL 和检查时间。
+- 命中类型映射为中文：`missing` 显示 `商品缺失`，`price_increase` 显示 `价格上涨`，`low_stock` 显示 `低库存`。
+- 同一条报警命中多个类型时，在同一行展示全部命中类型。
+- 价格或库存的新旧值为空时显示 `-`。
+- 来源 URL 可点击打开原始页面。
+- 商品查询搜索栏只在 `商品查询` tab 下显示。
 
 URL 监控列表交互：
 
@@ -108,6 +123,10 @@ URL 监控列表交互：
 
 验收点：
 
+- 打开页面默认展示 `监控报警`。
+- 监控报警列表能显示报警总数和报警明细。
+- 监控报警列表按检查时间倒序展示。
+- 监控报警列表超过 20 条时可以通过上一页、下一页分页查看。
 - URL 列表能显示 URL 和商品数。
 - URL 列表超过 20 条时可以通过上一页、下一页分页查看。
 - 点击 URL 会打开原始页面。
@@ -199,6 +218,13 @@ URL 监控列表交互：
 - URL 列表每页展示 20 条；21 条 URL 时第一页展示 20 条，第二页展示 1 条。
 - 点击 `标记失效` 后，URL 状态显示 `失效`，工作流不再处理该 URL。
 - 点击 `恢复有效` 后，该 URL 重新参与后续工作流处理。
+- 页面默认进入 `监控报警` tab。
+- 监控报警 tab 数字显示 `product_alert` 总数。
+- 监控报警列表按 `checkedAt` 倒序展示；检查时间相同的记录按 `id` 倒序展示。
+- 监控报警列表每页展示 20 条；21 条报警时第一页展示 20 条，第二页展示 1 条。
+- 监控报警列表中 `hitTypes` 多值时在同一行显示全部中文标签。
+- 监控报警列表中价格或库存的新旧值为空时显示 `-`。
+- 切换到 `URL监控` 或 `监控报警` 时，商品查询搜索栏隐藏；切换到 `商品查询` 时搜索栏显示。
 - 点击 URL 打开原始 URL 页面。
 - 点击商品数进入商品查询并筛选该 URL 商品。
 - 输入商品名称关键字进行模糊查询。
@@ -224,8 +250,8 @@ URL 监控列表交互：
 - `package.json`、`pnpm-lock.yaml`：新增 `xlsx` 依赖。
 - `src/models/types.ts`：扩展 `Source`、`Product` 类型，新增 `ProductAlertHitType`、`ProductAlert` 和工作流命中记录统计字段。
 - `src/libs/db.ts`：更新 Dexie schema 和索引，新增 `product_alert` 表。
-- `src/pages/index.html`：新增页面结构。
-- `src/pages/index.ts`：实现 Excel 导入、URL 列表、商品查询和交互逻辑。
+- `src/pages/index.html`：新增页面结构，包括监控报警列表。
+- `src/pages/index.ts`：实现监控报警、Excel 导入、URL 列表、商品查询和交互逻辑。
 - `src/pages/index.css`：实现页面样式。
 - `src/workflows/default_workflow.ts`：实现批量 URL 处理和商品更新工作流。
 

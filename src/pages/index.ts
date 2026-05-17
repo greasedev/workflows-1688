@@ -1,7 +1,7 @@
 import { Agent, AgentOptions } from "@greaseclaw/workflow-sdk";
 import * as XLSX from "xlsx";
 import { DB_TABLES, initDB } from "../libs/db";
-import type { Product, Source } from "../models/types";
+import type { Product, ProductAlert, ProductAlertHitType, Source } from "../models/types";
 
 type ImportStats = {
   added: number;
@@ -9,7 +9,7 @@ type ImportStats = {
   invalid: number;
 };
 
-type ActivePanel = "source" | "product";
+type ActivePanel = "alert" | "source" | "product";
 type PaginationState = {
   currentPage: number;
 };
@@ -22,8 +22,14 @@ type PaginationControls = {
 
 const SOURCE_URL_COLUMN = "上游1";
 const PAGE_SIZE = 20;
+const alertPaginationState: PaginationState = { currentPage: 1 };
 const sourcePaginationState: PaginationState = { currentPage: 1 };
 const productPaginationState: PaginationState = { currentPage: 1 };
+const ALERT_HIT_TYPE_LABELS: Record<ProductAlertHitType, string> = {
+  missing: "商品缺失",
+  price_increase: "价格上涨",
+  low_stock: "低库存",
+};
 
 // 扩展 Window 类型以包含 agentOptions
 declare global {
@@ -36,6 +42,7 @@ const agent = new Agent(window.agentOptions || {});
 const db = initDB(agent);
 const sourceTable = db.table<Source, number>(DB_TABLES.source);
 const productTable = db.table<Product, number>(DB_TABLES.product);
+const productAlertTable = db.table<ProductAlert, number>(DB_TABLES.productAlert);
 
 const excelInput = getElement<HTMLInputElement>("excelInput");
 const importModal = getElement<HTMLDivElement>("importModal");
@@ -44,10 +51,22 @@ const importModalBody = getElement<HTMLDivElement>("importModalBody");
 const importModalCloseButton = getElement<HTMLButtonElement>(
   "importModalCloseButton",
 );
+const alertTab = getElement<HTMLButtonElement>("alertTab");
 const sourceTab = getElement<HTMLButtonElement>("sourceTab");
 const productTab = getElement<HTMLButtonElement>("productTab");
+const alertPanel = getElement<HTMLElement>("alertPanel");
 const sourcePanel = getElement<HTMLElement>("sourcePanel");
 const productPanel = getElement<HTMLElement>("productPanel");
+const alertRows = getElement<HTMLTableSectionElement>("alertRows");
+const alertEmpty = getElement<HTMLDivElement>("alertEmpty");
+const alertPagination = getElement<HTMLDivElement>("alertPagination");
+const alertPaginationInfo = getElement<HTMLSpanElement>("alertPaginationInfo");
+const alertPrevPageButton = getElement<HTMLButtonElement>(
+  "alertPrevPageButton",
+);
+const alertNextPageButton = getElement<HTMLButtonElement>(
+  "alertNextPageButton",
+);
 const sourceRows = getElement<HTMLTableSectionElement>("sourceRows");
 const sourceEmpty = getElement<HTMLDivElement>("sourceEmpty");
 const sourcePagination = getElement<HTMLDivElement>("sourcePagination");
@@ -58,6 +77,7 @@ const sourcePrevPageButton = getElement<HTMLButtonElement>(
 const sourceNextPageButton = getElement<HTMLButtonElement>(
   "sourceNextPageButton",
 );
+const alertCount = getElement<HTMLSpanElement>("alertCount");
 const sourceCount = getElement<HTMLSpanElement>("sourceCount");
 const productCount = getElement<HTMLSpanElement>("productCount");
 const nameFilter = getElement<HTMLInputElement>("nameFilter");
@@ -76,6 +96,12 @@ const productNextPageButton = getElement<HTMLButtonElement>(
   "productNextPageButton",
 );
 const productSearchPanel = getElement<HTMLElement>("productSearchPanel");
+const alertPaginationControls: PaginationControls = {
+  container: alertPagination,
+  info: alertPaginationInfo,
+  prevButton: alertPrevPageButton,
+  nextButton: alertNextPageButton,
+};
 const sourcePaginationControls: PaginationControls = {
   container: sourcePagination,
   info: sourcePaginationInfo,
@@ -113,15 +139,20 @@ function closeImportModal() {
 }
 
 function setActivePanel(panel: ActivePanel) {
+  const isAlert = panel === "alert";
   const isSource = panel === "source";
+  const isProduct = panel === "product";
+  alertPanel.hidden = !isAlert;
   sourcePanel.hidden = !isSource;
-  productPanel.hidden = isSource;
-  productSearchPanel.hidden = isSource;
+  productPanel.hidden = !isProduct;
+  productSearchPanel.hidden = !isProduct;
 
+  alertTab.classList.toggle("active", isAlert);
+  alertTab.setAttribute("aria-selected", String(isAlert));
   sourceTab.classList.toggle("active", isSource);
   sourceTab.setAttribute("aria-selected", String(isSource));
-  productTab.classList.toggle("active", !isSource);
-  productTab.setAttribute("aria-selected", String(!isSource));
+  productTab.classList.toggle("active", isProduct);
+  productTab.setAttribute("aria-selected", String(isProduct));
 }
 
 function normalizeUrl(value: unknown): string | null {
@@ -157,6 +188,14 @@ function formatNumber(value: number): string {
   return new Intl.NumberFormat("zh-CN", {
     maximumFractionDigits: 2,
   }).format(value);
+}
+
+function formatOptionalNumber(value?: number): string {
+  return typeof value === "number" ? formatNumber(value) : "-";
+}
+
+function formatValueChange(previousValue?: number, currentValue?: number): string {
+  return `${formatOptionalNumber(previousValue)} -> ${formatOptionalNumber(currentValue)}`;
 }
 
 function totalPages(totalItems: number): number {
@@ -258,10 +297,11 @@ async function importExcel(file: File): Promise<ImportStats> {
   return stats;
 }
 
-async function loadSourcesAndProducts() {
-  const [sources, products] = await Promise.all([
+async function loadDashboardData() {
+  const [sources, products, alerts] = await Promise.all([
     sourceTable.orderBy("url").toArray(),
     productTable.toArray(),
+    productAlertTable.toArray(),
   ]);
 
   const countsByUrl = new Map<string, number>();
@@ -269,10 +309,78 @@ async function loadSourcesAndProducts() {
     countsByUrl.set(product.url, (countsByUrl.get(product.url) ?? 0) + 1);
   }
 
+  alertCount.textContent = String(alerts.length);
   sourceCount.textContent = String(sources.length);
   productCount.textContent = String(products.length);
+  renderAlerts(alerts);
   renderSources(sources, countsByUrl);
   renderProducts(products);
+}
+
+async function renderAlertsFromDb() {
+  const alerts = await productAlertTable.toArray();
+  renderAlerts(alerts);
+}
+
+function renderAlerts(alerts: ProductAlert[]) {
+  alertCount.textContent = String(alerts.length);
+  alertRows.textContent = "";
+  alertEmpty.classList.toggle("visible", alerts.length === 0);
+  normalizePage(alertPaginationState, alerts.length);
+  renderPagination(alertPaginationControls, alertPaginationState, alerts.length);
+
+  const sortedAlerts = [...alerts].sort((a, b) => {
+    const timeDiff = new Date(b.checkedAt).getTime() - new Date(a.checkedAt).getTime();
+    return timeDiff || (b.id ?? 0) - (a.id ?? 0);
+  });
+  const startIndex = pageStartIndex(alertPaginationState);
+  const pageAlerts = sortedAlerts.slice(startIndex, startIndex + PAGE_SIZE);
+
+  for (const alert of pageAlerts) {
+    const row = document.createElement("tr");
+    const nameCell = document.createElement("td");
+    const hitTypeCell = document.createElement("td");
+    const priceCell = document.createElement("td");
+    const stockCell = document.createElement("td");
+    const urlCell = document.createElement("td");
+    const checkedCell = document.createElement("td");
+    const productName = document.createElement("div");
+    const productSpec = document.createElement("div");
+    const hitTypeList = document.createElement("div");
+    const urlLink = document.createElement("a");
+
+    productName.className = "product-name";
+    productName.textContent = alert.name;
+    productSpec.className = "product-spec";
+    productSpec.textContent = `规格：${alert.spec}`;
+    nameCell.append(productName, productSpec);
+
+    hitTypeList.className = "alert-hit-list";
+    for (const hitType of alert.hitTypes) {
+      const hitTypeTag = document.createElement("span");
+      hitTypeTag.className = "alert-hit-tag";
+      hitTypeTag.textContent = ALERT_HIT_TYPE_LABELS[hitType] ?? hitType;
+      hitTypeList.append(hitTypeTag);
+    }
+    hitTypeCell.append(hitTypeList);
+
+    priceCell.className = "change-value";
+    priceCell.textContent = formatValueChange(alert.previousPrice, alert.currentPrice);
+    stockCell.className = "change-value";
+    stockCell.textContent = formatValueChange(alert.previousStock, alert.currentStock);
+
+    urlLink.className = "url-link";
+    urlLink.href = alert.url;
+    urlLink.target = "_blank";
+    urlLink.rel = "noopener noreferrer";
+    urlLink.textContent = alert.url;
+    urlCell.append(urlLink);
+
+    checkedCell.textContent = formatDate(alert.checkedAt);
+
+    row.append(nameCell, hitTypeCell, priceCell, stockCell, urlCell, checkedCell);
+    alertRows.append(row);
+  }
 }
 
 function renderSources(sources: Source[], countsByUrl: Map<string, number>) {
@@ -348,7 +456,7 @@ async function toggleSourceInvalid(source: Source, isInvalid: boolean) {
     invalidAt: isInvalid ? now : undefined,
     updatedAt: now,
   });
-  await loadSourcesAndProducts();
+  await loadDashboardData();
 }
 
 async function renderProductsFromDb() {
@@ -438,7 +546,7 @@ excelInput.addEventListener("change", async () => {
       `新增 URL：${stats.added} 个\n重复 URL：${stats.duplicate} 个\n无效或空值：${stats.invalid} 个`,
       "success",
     );
-    await loadSourcesAndProducts();
+    await loadDashboardData();
   } catch (error) {
     showImportModal(
       "导入失败",
@@ -466,6 +574,22 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+alertTab.addEventListener("click", () => {
+  setActivePanel("alert");
+  renderAlertsFromDb();
+});
+
+alertPrevPageButton.addEventListener("click", () => {
+  if (alertPaginationState.currentPage <= 1) return;
+  alertPaginationState.currentPage -= 1;
+  renderAlertsFromDb();
+});
+
+alertNextPageButton.addEventListener("click", () => {
+  alertPaginationState.currentPage += 1;
+  renderAlertsFromDb();
+});
+
 sourceTab.addEventListener("click", () => {
   setActivePanel("source");
 });
@@ -473,12 +597,12 @@ sourceTab.addEventListener("click", () => {
 sourcePrevPageButton.addEventListener("click", () => {
   if (sourcePaginationState.currentPage <= 1) return;
   sourcePaginationState.currentPage -= 1;
-  loadSourcesAndProducts();
+  loadDashboardData();
 });
 
 sourceNextPageButton.addEventListener("click", () => {
   sourcePaginationState.currentPage += 1;
-  loadSourcesAndProducts();
+  loadDashboardData();
 });
 
 productPrevPageButton.addEventListener("click", () => {
@@ -507,5 +631,5 @@ urlFilter.addEventListener("input", () => {
   renderProductsFromDb();
 });
 
-setActivePanel("source");
-loadSourcesAndProducts();
+setActivePanel("alert");
+loadDashboardData();

@@ -19,11 +19,22 @@
         <div class="list-tabs" role="tablist" aria-label="监控列表切换">
           <button
             class="tab-btn active"
+            id="alertTab"
+            type="button"
+            data-panel="alert"
+            role="tab"
+            aria-selected="true"
+          >
+            <span>监控报警</span>
+            <span class="tab-count" id="alertCount">0</span>
+          </button>
+          <button
+            class="tab-btn"
             id="sourceTab"
             type="button"
             data-panel="source"
             role="tab"
-            aria-selected="true"
+            aria-selected="false"
           >
             <span>URL监控</span>
             <span class="tab-count" id="sourceCount">0</span>
@@ -70,7 +81,31 @@
         </div>
       </div>
 
-      <section class="table-container" id="sourcePanel" role="tabpanel" aria-labelledby="sourceTab">
+      <section class="table-container" id="alertPanel" role="tabpanel" aria-labelledby="alertTab">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 22%;">商品信息</th>
+              <th style="width: 16%;">命中类型</th>
+              <th style="width: 12%;">价格变化</th>
+              <th style="width: 12%;">库存变化</th>
+              <th style="width: 26%;">来源 URL</th>
+              <th style="width: 12%;">检查时间</th>
+            </tr>
+          </thead>
+          <tbody id="alertRows"></tbody>
+        </table>
+        <div class="empty-state" id="alertEmpty">暂无监控报警。</div>
+        <div class="pagination" id="alertPagination" hidden>
+          <span class="pagination-info" id="alertPaginationInfo">0-0 / 0</span>
+          <div class="pagination-actions">
+            <button class="btn btn-secondary" id="alertPrevPageButton" type="button">上一页</button>
+            <button class="btn btn-secondary" id="alertNextPageButton" type="button">下一页</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="table-container" id="sourcePanel" role="tabpanel" aria-labelledby="sourceTab" hidden>
         <table>
           <thead>
             <tr>
