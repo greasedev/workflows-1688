@@ -362,15 +362,10 @@ tr:last-child td {
 }
 
 .price,
-.stock,
-.change-value {
+.stock {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
   font-weight: 500;
-}
-
-.change-value {
-  color: var(--text-primary);
 }
 
 .product-name {
@@ -392,8 +387,15 @@ tr:last-child td {
 
 .alert-hit-list {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.alert-hit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .alert-hit-tag {
@@ -407,6 +409,15 @@ tr:last-child td {
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
+}
+
+.alert-hit-detail {
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  overflow-wrap: anywhere;
 }
 
 .empty-state {

@@ -22,6 +22,8 @@ type PaginationControls = {
 
 const SOURCE_URL_COLUMN = "上游1";
 const PAGE_SIZE = 20;
+const TEST_ALERT_COUNT = 20;
+const LOW_STOCK_THRESHOLD = 100;
 const alertPaginationState: PaginationState = { currentPage: 1 };
 const sourcePaginationState: PaginationState = { currentPage: 1 };
 const productPaginationState: PaginationState = { currentPage: 1 };
@@ -30,6 +32,12 @@ const ALERT_HIT_TYPE_LABELS: Record<ProductAlertHitType, string> = {
   price_increase: "价格上涨",
   low_stock: "低库存",
 };
+const TEST_ALERT_PATTERNS: ProductAlertHitType[][] = [
+  ["missing"],
+  ["price_increase"],
+  ["low_stock"],
+  ["price_increase", "low_stock"],
+];
 
 // 扩展 Window 类型以包含 agentOptions
 declare global {
@@ -44,6 +52,9 @@ const sourceTable = db.table<Source, number>(DB_TABLES.source);
 const productTable = db.table<Product, number>(DB_TABLES.product);
 const productAlertTable = db.table<ProductAlert, number>(DB_TABLES.productAlert);
 
+const generateTestAlertsButton = getElement<HTMLButtonElement>(
+  "generateTestAlertsButton",
+);
 const excelInput = getElement<HTMLInputElement>("excelInput");
 const importModal = getElement<HTMLDivElement>("importModal");
 const importModalTitle = getElement<HTMLDivElement>("importModalTitle");
@@ -198,6 +209,16 @@ function formatValueChange(previousValue?: number, currentValue?: number): strin
   return `${formatOptionalNumber(previousValue)} -> ${formatOptionalNumber(currentValue)}`;
 }
 
+function alertHitTypeDetail(alert: ProductAlert, hitType: ProductAlertHitType): string {
+  if (hitType === "price_increase") {
+    return formatValueChange(alert.previousPrice, alert.currentPrice);
+  }
+  if (hitType === "low_stock") {
+    return formatValueChange(alert.previousStock, alert.currentStock);
+  }
+  return "";
+}
+
 function totalPages(totalItems: number): number {
   return Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
 }
@@ -297,6 +318,70 @@ async function importExcel(file: File): Promise<ImportStats> {
   return stats;
 }
 
+function lowerTestPrice(price: number): number {
+  return Number((price - Math.max(1, price * 0.1)).toFixed(2));
+}
+
+function lowTestStock(index: number): number {
+  return 20 + (index % 70);
+}
+
+function buildTestAlert(product: Product, hitTypes: ProductAlertHitType[], index: number): ProductAlert {
+  const checkedAt = new Date(Date.now() - index * 60 * 1000).toISOString();
+  const alert: ProductAlert = {
+    url: product.url,
+    name: product.name,
+    spec: product.spec,
+    hitTypes,
+    previousPrice: product.price,
+    currentPrice: product.price,
+    previousStock: product.stock,
+    currentStock: product.stock,
+    stockThreshold: LOW_STOCK_THRESHOLD,
+    checkedAt,
+  };
+
+  if (hitTypes.includes("missing")) {
+    alert.currentPrice = undefined;
+    alert.currentStock = undefined;
+  }
+
+  if (hitTypes.includes("price_increase")) {
+    alert.previousPrice = lowerTestPrice(product.price);
+    alert.currentPrice = product.price;
+  }
+
+  if (hitTypes.includes("low_stock")) {
+    alert.previousStock = product.stock;
+    alert.currentStock = lowTestStock(index);
+  }
+
+  return alert;
+}
+
+async function generateTestAlerts() {
+  const products = await productTable.toArray();
+  if (products.length === 0) {
+    showImportModal("无法生成", "暂无商品数据，无法生成测试报警。", "error");
+    return;
+  }
+
+  const alerts: ProductAlert[] = [];
+  for (let index = 0; index < TEST_ALERT_COUNT; index += 1) {
+    const product = products[index % products.length];
+    const hitTypes = TEST_ALERT_PATTERNS[index % TEST_ALERT_PATTERNS.length];
+    alerts.push(buildTestAlert(product, hitTypes, index));
+  }
+
+  await productAlertTable.clear();
+  await productAlertTable.bulkAdd(alerts);
+
+  alertPaginationState.currentPage = 1;
+  setActivePanel("alert");
+  await loadDashboardData();
+  showImportModal("生成完成", `已生成 ${TEST_ALERT_COUNT} 条测试报警。`, "success");
+}
+
 async function loadDashboardData() {
   const [sources, products, alerts] = await Promise.all([
     sourceTable.orderBy("url").toArray(),
@@ -340,8 +425,6 @@ function renderAlerts(alerts: ProductAlert[]) {
     const row = document.createElement("tr");
     const nameCell = document.createElement("td");
     const hitTypeCell = document.createElement("td");
-    const priceCell = document.createElement("td");
-    const stockCell = document.createElement("td");
     const urlCell = document.createElement("td");
     const checkedCell = document.createElement("td");
     const productName = document.createElement("div");
@@ -357,17 +440,25 @@ function renderAlerts(alerts: ProductAlert[]) {
 
     hitTypeList.className = "alert-hit-list";
     for (const hitType of alert.hitTypes) {
+      const hitTypeRow = document.createElement("div");
       const hitTypeTag = document.createElement("span");
+      const hitTypeDetail = document.createElement("span");
+      const detailText = alertHitTypeDetail(alert, hitType);
+
+      hitTypeRow.className = "alert-hit-row";
       hitTypeTag.className = "alert-hit-tag";
       hitTypeTag.textContent = ALERT_HIT_TYPE_LABELS[hitType] ?? hitType;
-      hitTypeList.append(hitTypeTag);
+      hitTypeRow.append(hitTypeTag);
+
+      if (detailText) {
+        hitTypeDetail.className = "alert-hit-detail";
+        hitTypeDetail.textContent = detailText;
+        hitTypeRow.append(hitTypeDetail);
+      }
+
+      hitTypeList.append(hitTypeRow);
     }
     hitTypeCell.append(hitTypeList);
-
-    priceCell.className = "change-value";
-    priceCell.textContent = formatValueChange(alert.previousPrice, alert.currentPrice);
-    stockCell.className = "change-value";
-    stockCell.textContent = formatValueChange(alert.previousStock, alert.currentStock);
 
     urlLink.className = "url-link";
     urlLink.href = alert.url;
@@ -378,7 +469,7 @@ function renderAlerts(alerts: ProductAlert[]) {
 
     checkedCell.textContent = formatDate(alert.checkedAt);
 
-    row.append(nameCell, hitTypeCell, priceCell, stockCell, urlCell, checkedCell);
+    row.append(nameCell, hitTypeCell, urlCell, checkedCell);
     alertRows.append(row);
   }
 }
@@ -571,6 +662,21 @@ importModal.addEventListener("click", (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     closeImportModal();
+  }
+});
+
+generateTestAlertsButton.addEventListener("click", async () => {
+  generateTestAlertsButton.disabled = true;
+  try {
+    await generateTestAlerts();
+  } catch (error) {
+    showImportModal(
+      "生成失败",
+      error instanceof Error ? error.message : "生成测试报警失败。",
+      "error",
+    );
+  } finally {
+    generateTestAlertsButton.disabled = false;
   }
 });
 

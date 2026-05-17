@@ -52,6 +52,9 @@
           </button>
         </div>
         <div class="toolbar-actions">
+          <button class="btn btn-secondary" id="generateTestAlertsButton" type="button">
+            生成测试报警
+          </button>
           <label class="btn btn-primary file-import-btn">
             <input id="excelInput" type="file" accept=".xlsx,.xls,.csv" />
             <span>导入URL</span>
@@ -86,11 +89,9 @@
           <thead>
             <tr>
               <th style="width: 22%;">商品信息</th>
-              <th style="width: 16%;">命中类型</th>
-              <th style="width: 12%;">价格变化</th>
-              <th style="width: 12%;">库存变化</th>
-              <th style="width: 26%;">来源 URL</th>
-              <th style="width: 12%;">检查时间</th>
+              <th style="width: 32%;">命中类型</th>
+              <th style="width: 32%;">来源 URL</th>
+              <th style="width: 14%;">检查时间</th>
             </tr>
           </thead>
           <tbody id="alertRows"></tbody>
