@@ -10,8 +10,20 @@ type ImportStats = {
 };
 
 type ActivePanel = "source" | "product";
+type PaginationState = {
+  currentPage: number;
+};
+type PaginationControls = {
+  container: HTMLElement;
+  info: HTMLElement;
+  prevButton: HTMLButtonElement;
+  nextButton: HTMLButtonElement;
+};
 
 const SOURCE_URL_COLUMN = "上游1";
+const PAGE_SIZE = 20;
+const sourcePaginationState: PaginationState = { currentPage: 1 };
+const productPaginationState: PaginationState = { currentPage: 1 };
 
 // 扩展 Window 类型以包含 agentOptions
 declare global {
@@ -32,20 +44,49 @@ const importModalBody = getElement<HTMLDivElement>("importModalBody");
 const importModalCloseButton = getElement<HTMLButtonElement>(
   "importModalCloseButton",
 );
-const refreshButton = getElement<HTMLButtonElement>("refreshButton");
 const sourceTab = getElement<HTMLButtonElement>("sourceTab");
 const productTab = getElement<HTMLButtonElement>("productTab");
 const sourcePanel = getElement<HTMLElement>("sourcePanel");
 const productPanel = getElement<HTMLElement>("productPanel");
 const sourceRows = getElement<HTMLTableSectionElement>("sourceRows");
 const sourceEmpty = getElement<HTMLDivElement>("sourceEmpty");
+const sourcePagination = getElement<HTMLDivElement>("sourcePagination");
+const sourcePaginationInfo = getElement<HTMLSpanElement>("sourcePaginationInfo");
+const sourcePrevPageButton = getElement<HTMLButtonElement>(
+  "sourcePrevPageButton",
+);
+const sourceNextPageButton = getElement<HTMLButtonElement>(
+  "sourceNextPageButton",
+);
 const sourceCount = getElement<HTMLSpanElement>("sourceCount");
 const productCount = getElement<HTMLSpanElement>("productCount");
 const nameFilter = getElement<HTMLInputElement>("nameFilter");
 const urlFilter = getElement<HTMLInputElement>("urlFilter");
 const productRows = getElement<HTMLTableSectionElement>("productRows");
 const productEmpty = getElement<HTMLDivElement>("productEmpty");
+const productPagination = getElement<HTMLDivElement>("productPagination");
+const productPaginationInfo = getElement<HTMLSpanElement>(
+  "productPaginationInfo",
+);
+const productPrevPageButton = getElement<HTMLButtonElement>(
+  "productPrevPageButton",
+);
+const productNextPageButton = getElement<HTMLButtonElement>(
+  "productNextPageButton",
+);
 const productSearchPanel = getElement<HTMLElement>("productSearchPanel");
+const sourcePaginationControls: PaginationControls = {
+  container: sourcePagination,
+  info: sourcePaginationInfo,
+  prevButton: sourcePrevPageButton,
+  nextButton: sourceNextPageButton,
+};
+const productPaginationControls: PaginationControls = {
+  container: productPagination,
+  info: productPaginationInfo,
+  prevButton: productPrevPageButton,
+  nextButton: productNextPageButton,
+};
 
 function getElement<T extends HTMLElement>(id: string): T {
   const element = document.getElementById(id);
@@ -115,6 +156,39 @@ function formatNumber(value: number): string {
   return new Intl.NumberFormat("zh-CN", {
     maximumFractionDigits: 2,
   }).format(value);
+}
+
+function totalPages(totalItems: number): number {
+  return Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
+}
+
+function normalizePage(state: PaginationState, totalItems: number) {
+  const maxPage = totalPages(totalItems);
+  state.currentPage = Math.min(Math.max(state.currentPage, 1), maxPage);
+}
+
+function pageStartIndex(state: PaginationState): number {
+  return (state.currentPage - 1) * PAGE_SIZE;
+}
+
+function renderPagination(
+  controls: PaginationControls,
+  state: PaginationState,
+  totalItems: number,
+) {
+  controls.container.hidden = totalItems === 0;
+  if (totalItems === 0) {
+    controls.info.textContent = "0-0 / 0";
+    controls.prevButton.disabled = true;
+    controls.nextButton.disabled = true;
+    return;
+  }
+
+  const start = pageStartIndex(state) + 1;
+  const end = Math.min(state.currentPage * PAGE_SIZE, totalItems);
+  controls.info.textContent = `${start}-${end} / ${totalItems}`;
+  controls.prevButton.disabled = state.currentPage <= 1;
+  controls.nextButton.disabled = state.currentPage >= totalPages(totalItems);
 }
 
 function hasSourceUrlHeader(sheet: XLSX.WorkSheet): boolean {
@@ -199,8 +273,13 @@ async function loadSourcesAndProducts() {
 function renderSources(sources: Source[], countsByUrl: Map<string, number>) {
   sourceRows.textContent = "";
   sourceEmpty.classList.toggle("visible", sources.length === 0);
+  normalizePage(sourcePaginationState, sources.length);
+  renderPagination(sourcePaginationControls, sourcePaginationState, sources.length);
 
-  for (const source of sources) {
+  const startIndex = pageStartIndex(sourcePaginationState);
+  const pageSources = sources.slice(startIndex, startIndex + PAGE_SIZE);
+
+  for (const source of pageSources) {
     const row = document.createElement("tr");
     const urlCell = document.createElement("td");
     const countCell = document.createElement("td");
@@ -225,6 +304,7 @@ function renderSources(sources: Source[], countsByUrl: Map<string, number>) {
     countButton.textContent = String(productTotal);
     countButton.addEventListener("click", () => {
       urlFilter.value = source.url;
+      productPaginationState.currentPage = 1;
       setActivePanel("product");
       renderProductsFromDb();
       productSearchPanel.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -278,6 +358,7 @@ function renderProducts(products: Product[]) {
   productRows.textContent = "";
   if (!nameQuery && !urlQuery) {
     productEmpty.classList.add("visible");
+    renderPagination(productPaginationControls, productPaginationState, 0);
     return;
   }
 
@@ -296,8 +377,13 @@ function renderProducts(products: Product[]) {
     });
 
   productEmpty.classList.toggle("visible", filtered.length === 0);
+  normalizePage(productPaginationState, filtered.length);
+  renderPagination(productPaginationControls, productPaginationState, filtered.length);
 
-  for (const product of filtered) {
+  const startIndex = pageStartIndex(productPaginationState);
+  const pageProducts = filtered.slice(startIndex, startIndex + PAGE_SIZE);
+
+  for (const product of pageProducts) {
     const row = document.createElement("tr");
     const nameCell = document.createElement("td");
     const productName = document.createElement("div");
@@ -372,12 +458,30 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-refreshButton.addEventListener("click", () => {
+sourceTab.addEventListener("click", () => {
+  setActivePanel("source");
+});
+
+sourcePrevPageButton.addEventListener("click", () => {
+  if (sourcePaginationState.currentPage <= 1) return;
+  sourcePaginationState.currentPage -= 1;
   loadSourcesAndProducts();
 });
 
-sourceTab.addEventListener("click", () => {
-  setActivePanel("source");
+sourceNextPageButton.addEventListener("click", () => {
+  sourcePaginationState.currentPage += 1;
+  loadSourcesAndProducts();
+});
+
+productPrevPageButton.addEventListener("click", () => {
+  if (productPaginationState.currentPage <= 1) return;
+  productPaginationState.currentPage -= 1;
+  renderProductsFromDb();
+});
+
+productNextPageButton.addEventListener("click", () => {
+  productPaginationState.currentPage += 1;
+  renderProductsFromDb();
 });
 
 productTab.addEventListener("click", () => {
@@ -386,10 +490,12 @@ productTab.addEventListener("click", () => {
 });
 
 nameFilter.addEventListener("input", () => {
+  productPaginationState.currentPage = 1;
   renderProductsFromDb();
 });
 
 urlFilter.addEventListener("input", () => {
+  productPaginationState.currentPage = 1;
   renderProductsFromDb();
 });
 

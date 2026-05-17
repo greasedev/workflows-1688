@@ -11,7 +11,6 @@
       <div class="header">
         <h1>商品价格与库存监控</h1>
         <p class="header-subtitle">
-          <span>AI Agent 商品全流程跟踪系统</span>
           <button class="manual-entry-btn" type="button">用户手册</button>
         </p>
       </div>
@@ -42,7 +41,6 @@
           </button>
         </div>
         <div class="toolbar-actions">
-          <button class="btn btn-secondary" id="refreshButton" type="button">刷新</button>
           <label class="btn btn-primary file-import-btn">
             <input id="excelInput" type="file" accept=".xlsx,.xls,.csv" />
             <span>导入URL</span>
@@ -85,6 +83,13 @@
           <tbody id="sourceRows"></tbody>
         </table>
         <div class="empty-state" id="sourceEmpty">暂无监控 URL，请先导入 Excel。</div>
+        <div class="pagination" id="sourcePagination" hidden>
+          <span class="pagination-info" id="sourcePaginationInfo">0-0 / 0</span>
+          <div class="pagination-actions">
+            <button class="btn btn-secondary" id="sourcePrevPageButton" type="button">上一页</button>
+            <button class="btn btn-secondary" id="sourceNextPageButton" type="button">下一页</button>
+          </div>
+        </div>
       </section>
 
       <section
@@ -107,6 +112,13 @@
           <tbody id="productRows"></tbody>
         </table>
         <div class="empty-state" id="productEmpty">请输入商品名称或 URL 查询。</div>
+        <div class="pagination" id="productPagination" hidden>
+          <span class="pagination-info" id="productPaginationInfo">0-0 / 0</span>
+          <div class="pagination-actions">
+            <button class="btn btn-secondary" id="productPrevPageButton" type="button">上一页</button>
+            <button class="btn btn-secondary" id="productNextPageButton" type="button">下一页</button>
+          </div>
+        </div>
       </section>
     </div>
 
