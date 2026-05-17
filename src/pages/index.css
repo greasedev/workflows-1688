@@ -375,6 +375,13 @@ tr:last-child td {
   min-width: 80px;
 }
 
+.row-no {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
 .price,
 .stock {
   white-space: nowrap;

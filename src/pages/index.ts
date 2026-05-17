@@ -318,6 +318,13 @@ function pageStartIndex(state: PaginationState): number {
   return (state.currentPage - 1) * PAGE_SIZE;
 }
 
+function createNoCell(rowNumber: number): HTMLTableCellElement {
+  const noCell = document.createElement("td");
+  noCell.className = "row-no";
+  noCell.textContent = String(rowNumber);
+  return noCell;
+}
+
 function renderPagination(
   controls: PaginationControls,
   state: PaginationState,
@@ -513,8 +520,9 @@ function renderAlerts(alerts: ProductAlert[]) {
   const startIndex = pageStartIndex(alertPaginationState);
   const pageAlerts = sortedAlerts.slice(startIndex, startIndex + PAGE_SIZE);
 
-  for (const alert of pageAlerts) {
+  for (const [index, alert] of pageAlerts.entries()) {
     const row = document.createElement("tr");
+    const noCell = createNoCell(startIndex + index + 1);
     const nameCell = document.createElement("td");
     const hitTypeCell = document.createElement("td");
     const urlCell = document.createElement("td");
@@ -561,7 +569,7 @@ function renderAlerts(alerts: ProductAlert[]) {
 
     checkedCell.textContent = formatDate(alert.checkedAt);
 
-    row.append(nameCell, hitTypeCell, urlCell, checkedCell);
+    row.append(noCell, nameCell, hitTypeCell, urlCell, checkedCell);
     alertRows.append(row);
   }
 }
@@ -575,8 +583,9 @@ function renderSources(sources: Source[], countsByUrl: Map<string, number>) {
   const startIndex = pageStartIndex(sourcePaginationState);
   const pageSources = sources.slice(startIndex, startIndex + PAGE_SIZE);
 
-  for (const source of pageSources) {
+  for (const [index, source] of pageSources.entries()) {
     const row = document.createElement("tr");
+    const noCell = createNoCell(startIndex + index + 1);
     const urlCell = document.createElement("td");
     const countCell = document.createElement("td");
     const checkedCell = document.createElement("td");
@@ -625,7 +634,7 @@ function renderSources(sources: Source[], countsByUrl: Map<string, number>) {
     });
     actionCell.append(actionButton);
 
-    row.append(urlCell, countCell, checkedCell, statusCell, actionCell);
+    row.append(noCell, urlCell, countCell, checkedCell, statusCell, actionCell);
     sourceRows.append(row);
   }
 }
@@ -682,8 +691,9 @@ function renderProducts(products: Product[]) {
   const startIndex = pageStartIndex(productPaginationState);
   const pageProducts = filtered.slice(startIndex, startIndex + PAGE_SIZE);
 
-  for (const product of pageProducts) {
+  for (const [index, product] of pageProducts.entries()) {
     const row = document.createElement("tr");
+    const noCell = createNoCell(startIndex + index + 1);
     const nameCell = document.createElement("td");
     const productName = document.createElement("div");
     const productSpec = document.createElement("div");
@@ -712,7 +722,7 @@ function renderProducts(products: Product[]) {
 
     updatedCell.textContent = formatDate(product.updatedAt);
 
-    row.append(nameCell, priceCell, stockCell, urlCell, updatedCell);
+    row.append(noCell, nameCell, priceCell, stockCell, urlCell, updatedCell);
     productRows.append(row);
   }
 }
