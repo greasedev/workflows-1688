@@ -205,13 +205,21 @@ function formatOptionalNumber(value?: number): string {
   return typeof value === "number" ? formatNumber(value) : "-";
 }
 
+function formatPrice(value?: number): string {
+  return typeof value === "number" ? `¥${formatNumber(value)}` : "-";
+}
+
 function formatValueChange(previousValue?: number, currentValue?: number): string {
   return `${formatOptionalNumber(previousValue)} -> ${formatOptionalNumber(currentValue)}`;
 }
 
+function formatPriceChange(previousValue?: number, currentValue?: number): string {
+  return `${formatPrice(previousValue)} -> ${formatPrice(currentValue)}`;
+}
+
 function alertHitTypeDetail(alert: ProductAlert, hitType: ProductAlertHitType): string {
   if (hitType === "price_increase") {
-    return formatValueChange(alert.previousPrice, alert.currentPrice);
+    return formatPriceChange(alert.previousPrice, alert.currentPrice);
   }
   if (hitType === "low_stock") {
     return formatValueChange(alert.previousStock, alert.currentStock);
@@ -607,7 +615,7 @@ function renderProducts(products: Product[]) {
     productSpec.textContent = `规格：${product.spec}`;
     nameCell.append(productName, productSpec);
     priceCell.className = "price";
-    priceCell.textContent = formatNumber(product.price);
+    priceCell.textContent = formatPrice(product.price);
     stockCell.className = "stock";
     stockCell.textContent = formatNumber(product.stock);
 
