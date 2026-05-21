@@ -361,6 +361,24 @@ tr:last-child td {
   text-decoration: underline;
 }
 
+.source-status-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+.source-status-filter select {
+  max-width: 80px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text-primary);
+  font: inherit;
+}
+
 .status-ok {
   color: var(--success);
 }
@@ -508,6 +526,16 @@ tr:last-child td {
   padding: 0;
 }
 
+.manual-modal-content {
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 760px);
+  max-width: 760px;
+  max-height: calc(100vh - 40px);
+  overflow: hidden;
+  padding: 0;
+}
+
 .modal-title {
   margin-bottom: 16px;
   color: var(--text-primary);
@@ -608,6 +636,48 @@ tr:last-child td {
   border-top: 1px solid var(--border);
 }
 
+.manual-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  overflow-y: auto;
+  padding: 22px 28px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.manual-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.manual-section h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.manual-section p,
+.manual-section ul {
+  margin: 0;
+}
+
+.manual-section ul {
+  padding-left: 18px;
+}
+
+.manual-section li + li {
+  margin-top: 4px;
+}
+
+.manual-actions {
+  padding: 18px 28px 24px;
+  border-top: 1px solid var(--border);
+}
+
 @media (max-width: 768px) {
   .list-toolbar,
   .barcode-search-panel {
@@ -678,6 +748,14 @@ tr:last-child td {
 
   .settings-modal-header {
     padding: 20px 20px 14px;
+  }
+
+  .manual-body {
+    padding: 18px 20px;
+  }
+
+  .manual-actions {
+    padding: 16px 20px 20px;
   }
 
   .settings-form {

@@ -11,7 +11,7 @@
       <div class="header">
         <h1>商品价格与库存监控</h1>
         <p class="header-subtitle">
-          <button class="manual-entry-btn" type="button">用户手册</button>
+          <button class="manual-entry-btn" id="userManualButton" type="button">用户手册</button>
         </p>
       </div>
 
@@ -52,9 +52,6 @@
           </button>
         </div>
         <div class="toolbar-actions">
-          <button class="btn btn-secondary" id="generateTestAlertsButton" type="button">
-            生成测试报警
-          </button>
           <label class="btn btn-primary file-import-btn">
             <input id="excelInput" type="file" accept=".xlsx,.xls,.csv" />
             <span>导入URL</span>
@@ -92,8 +89,8 @@
           <thead>
             <tr>
               <th style="width: 6%;">No.</th>
-              <th style="width: 20%;">商品信息</th>
-              <th style="width: 31%;">命中类型</th>
+              <th style="width: 30%;">商品信息</th>
+              <th style="width: 21%;">命中类型</th>
               <th style="width: 29%;">来源 URL</th>
               <th style="width: 14%;">检查时间</th>
             </tr>
@@ -118,7 +115,17 @@
               <th style="width: 40%;">URL</th>
               <th style="width: 12%;">商品数</th>
               <th style="width: 15%;">最近检查</th>
-              <th style="width: 13%;">状态</th>
+              <th style="width: 13%;">
+                <label class="source-status-filter" for="sourceStatusFilter">
+                  <span>状态</span>
+                  <select id="sourceStatusFilter" aria-label="筛选 URL 状态">
+                    <option value="all" selected>全部</option>
+                    <option value="normal">正常</option>
+                    <option value="invalid">失效</option>
+                    <option value="error">异常</option>
+                  </select>
+                </label>
+              </th>
               <th style="width: 14%;">操作</th>
             </tr>
           </thead>
@@ -222,6 +229,86 @@
             <button class="btn btn-primary" type="submit">保存</button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <div class="modal" id="userManualModal" role="dialog" aria-modal="true" aria-labelledby="userManualTitle">
+      <div class="modal-content manual-modal-content">
+        <div class="settings-modal-header">
+          <div>
+            <div class="modal-title" id="userManualTitle">用户手册</div>
+            <div class="settings-modal-subtitle">商品价格与库存监控操作指南</div>
+          </div>
+        </div>
+        <div class="manual-body">
+          <section class="manual-section">
+            <h2>系统用途</h2>
+            <p>
+              本系统用于监控商品价格、库存和异常情况。用户导入需要监控的 URL 后，后台工作流会提取商品名称、规格、价格和库存，并将结果保存到本地数据库。
+            </p>
+          </section>
+
+          <section class="manual-section">
+            <h2>导入 URL</h2>
+            <ul>
+              <li>点击「导入URL」，上传 Excel、XLS 或 CSV 文件。</li>
+              <li>文件必须包含固定表头「上游1」，系统只读取该列中的非空 URL。</li>
+              <li>导入采用合并去重模式：已有 URL 不重复写入，失效状态不会因重新导入而改变。</li>
+              <li>导入完成后会显示新增 URL、重复 URL、无效或空值的数量。</li>
+            </ul>
+          </section>
+
+          <section class="manual-section">
+            <h2>监控报警</h2>
+            <ul>
+              <li>页面默认展示「监控报警」，列表按检查时间倒序排列。</li>
+              <li>命中类型包括「商品缺失」「价格上涨」「低库存」。同一商品命中多个类型时会在同一单元格内分行展示。</li>
+              <li>价格变化带「¥」标识，库存变化不带币种；缺失值显示为「-」。</li>
+              <li>点击来源 URL 可在新页面打开原始商品页面。</li>
+            </ul>
+          </section>
+
+          <section class="manual-section">
+            <h2>URL 监控</h2>
+            <ul>
+              <li>「URL监控」展示已导入 URL、已提取商品数、最近检查时间、状态和操作。</li>
+              <li>点击 URL 打开原始页面；点击商品数会切换到「商品查询」并按该 URL 筛选商品。</li>
+              <li>状态分为「正常」「失效」「异常」。表头可按状态筛选，也可选择「全部」清除筛选。</li>
+              <li>点击「标记失效」后，该 URL 仍保留在列表中，但后台工作流会跳过；点击「恢复有效」后重新参与监控。</li>
+            </ul>
+          </section>
+
+          <section class="manual-section">
+            <h2>商品查询</h2>
+            <ul>
+              <li>「商品查询」支持按商品名称模糊搜索，也支持按 URL 搜索。</li>
+              <li>商品名称和 URL 同时填写时，结果需要同时满足两个条件。</li>
+              <li>搜索栏左侧会显示当前查询到的商品数量；结果列表每页展示 20 条。</li>
+              <li>商品价格统一带「¥」标识，库存等非价格数字不带币种。</li>
+            </ul>
+          </section>
+
+          <section class="manual-section">
+            <h2>设置</h2>
+            <ul>
+              <li>点击「设置」可配置监控参数。</li>
+              <li>「监控最大并发数」控制每批最多同时处理的有效 URL 数量，允许范围为 1-50，默认值为 1。</li>
+              <li>「库存预警值」用于判断低库存，必须大于等于 1，默认值为 100。库存小于该值时会生成低库存报警。</li>
+            </ul>
+          </section>
+
+          <section class="manual-section">
+            <h2>后台工作流</h2>
+            <ul>
+              <li>工作流会批量检查所有有效 URL，单个 URL 失败不会阻断其他 URL。</li>
+              <li>处理成功时会更新商品价格、库存和 URL 最近检查时间；处理失败时会记录错误并在 URL 状态中显示异常。</li>
+              <li>如果历史商品本次没有被提取到，且历史库存不为 0，系统会将其视为商品缺失并记录报警。</li>
+            </ul>
+          </section>
+        </div>
+        <div class="modal-actions manual-actions">
+          <button class="btn btn-primary" id="userManualCloseButton" type="button">关闭</button>
+        </div>
       </div>
     </div>
 

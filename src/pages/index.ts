@@ -15,6 +15,7 @@ type ImportStats = {
 };
 
 type ActivePanel = "alert" | "source" | "product";
+type SourceStatusFilter = "all" | "normal" | "invalid" | "error";
 type PaginationState = {
   currentPage: number;
 };
@@ -27,21 +28,15 @@ type PaginationControls = {
 
 const SOURCE_URL_COLUMN = "上游1";
 const PAGE_SIZE = 20;
-const TEST_ALERT_COUNT = 20;
 const alertPaginationState: PaginationState = { currentPage: 1 };
 const sourcePaginationState: PaginationState = { currentPage: 1 };
 const productPaginationState: PaginationState = { currentPage: 1 };
+let sourceStatusFilterValue: SourceStatusFilter = "all";
 const ALERT_HIT_TYPE_LABELS: Record<ProductAlertHitType, string> = {
   missing: "商品缺失",
   price_increase: "价格上涨",
   low_stock: "低库存",
 };
-const TEST_ALERT_PATTERNS: ProductAlertHitType[][] = [
-  ["missing"],
-  ["price_increase"],
-  ["low_stock"],
-  ["price_increase", "low_stock"],
-];
 
 // 扩展 Window 类型以包含 agentOptions
 declare global {
@@ -57,8 +52,10 @@ const productTable = db.table<Product, number>(DB_TABLES.product);
 const productAlertTable = db.table<ProductAlert, number>(DB_TABLES.productAlert);
 const settingsTable = db.table<AppSettings, string>(DB_TABLES.settings);
 
-const generateTestAlertsButton = getElement<HTMLButtonElement>(
-  "generateTestAlertsButton",
+const userManualButton = getElement<HTMLButtonElement>("userManualButton");
+const userManualModal = getElement<HTMLDivElement>("userManualModal");
+const userManualCloseButton = getElement<HTMLButtonElement>(
+  "userManualCloseButton",
 );
 const excelInput = getElement<HTMLInputElement>("excelInput");
 const settingsButton = getElement<HTMLButtonElement>("settingsButton");
@@ -100,6 +97,7 @@ const sourceRows = getElement<HTMLTableSectionElement>("sourceRows");
 const sourceEmpty = getElement<HTMLDivElement>("sourceEmpty");
 const sourcePagination = getElement<HTMLDivElement>("sourcePagination");
 const sourcePaginationInfo = getElement<HTMLSpanElement>("sourcePaginationInfo");
+const sourceStatusFilter = getElement<HTMLSelectElement>("sourceStatusFilter");
 const sourcePrevPageButton = getElement<HTMLButtonElement>(
   "sourcePrevPageButton",
 );
@@ -178,6 +176,14 @@ async function openSettingsModal() {
 
 function closeSettingsModal() {
   settingsModal.classList.remove("active");
+}
+
+function openUserManualModal() {
+  userManualModal.classList.add("active");
+}
+
+function closeUserManualModal() {
+  userManualModal.classList.remove("active");
 }
 
 function showSettingsError(message: string) {
@@ -411,76 +417,6 @@ async function importExcel(file: File): Promise<ImportStats> {
   return stats;
 }
 
-function lowerTestPrice(price: number): number {
-  return Number((price - Math.max(1, price * 0.1)).toFixed(2));
-}
-
-function lowTestStock(index: number, stockAlertThreshold: number): number {
-  return Math.max(0, stockAlertThreshold - 1 - (index % 30));
-}
-
-function buildTestAlert(
-  product: Product,
-  hitTypes: ProductAlertHitType[],
-  index: number,
-  stockAlertThreshold: number,
-): ProductAlert {
-  const checkedAt = new Date(Date.now() - index * 60 * 1000).toISOString();
-  const alert: ProductAlert = {
-    url: product.url,
-    name: product.name,
-    spec: product.spec,
-    hitTypes,
-    previousPrice: product.price,
-    currentPrice: product.price,
-    previousStock: product.stock,
-    currentStock: product.stock,
-    stockThreshold: stockAlertThreshold,
-    checkedAt,
-  };
-
-  if (hitTypes.includes("missing")) {
-    alert.currentPrice = undefined;
-    alert.currentStock = undefined;
-  }
-
-  if (hitTypes.includes("price_increase")) {
-    alert.previousPrice = lowerTestPrice(product.price);
-    alert.currentPrice = product.price;
-  }
-
-  if (hitTypes.includes("low_stock")) {
-    alert.previousStock = product.stock;
-    alert.currentStock = lowTestStock(index, stockAlertThreshold);
-  }
-
-  return alert;
-}
-
-async function generateTestAlerts() {
-  const products = await productTable.toArray();
-  if (products.length === 0) {
-    showImportModal("无法生成", "暂无商品数据，无法生成测试报警。", "error");
-    return;
-  }
-
-  const settings = await getAppSettings(settingsTable);
-  const alerts: ProductAlert[] = [];
-  for (let index = 0; index < TEST_ALERT_COUNT; index += 1) {
-    const product = products[index % products.length];
-    const hitTypes = TEST_ALERT_PATTERNS[index % TEST_ALERT_PATTERNS.length];
-    alerts.push(buildTestAlert(product, hitTypes, index, settings.stockAlertThreshold));
-  }
-
-  await productAlertTable.clear();
-  await productAlertTable.bulkAdd(alerts);
-
-  alertPaginationState.currentPage = 1;
-  setActivePanel("alert");
-  await loadDashboardData();
-  showImportModal("生成完成", `已生成 ${TEST_ALERT_COUNT} 条测试报警。`, "success");
-}
-
 async function loadDashboardData() {
   const [sources, products, alerts] = await Promise.all([
     sourceTable.orderBy("url").toArray(),
@@ -574,14 +510,35 @@ function renderAlerts(alerts: ProductAlert[]) {
   }
 }
 
+function sourceStatus(source: Source): Exclude<SourceStatusFilter, "all"> {
+  if (source.isInvalid === true) return "invalid";
+  if (source.lastError) return "error";
+  return "normal";
+}
+
+function filterSourcesByStatus(sources: Source[]): Source[] {
+  if (sourceStatusFilterValue === "all") return sources;
+  return sources.filter((source) => sourceStatus(source) === sourceStatusFilterValue);
+}
+
 function renderSources(sources: Source[], countsByUrl: Map<string, number>) {
+  const filteredSources = filterSourcesByStatus(sources);
+
   sourceRows.textContent = "";
-  sourceEmpty.classList.toggle("visible", sources.length === 0);
-  normalizePage(sourcePaginationState, sources.length);
-  renderPagination(sourcePaginationControls, sourcePaginationState, sources.length);
+  sourceEmpty.textContent =
+    sources.length === 0
+      ? "暂无监控 URL，请先导入 Excel。"
+      : "当前状态筛选下暂无监控 URL。";
+  sourceEmpty.classList.toggle("visible", filteredSources.length === 0);
+  normalizePage(sourcePaginationState, filteredSources.length);
+  renderPagination(
+    sourcePaginationControls,
+    sourcePaginationState,
+    filteredSources.length,
+  );
 
   const startIndex = pageStartIndex(sourcePaginationState);
-  const pageSources = sources.slice(startIndex, startIndex + PAGE_SIZE);
+  const pageSources = filteredSources.slice(startIndex, startIndex + PAGE_SIZE);
 
   for (const [index, source] of pageSources.entries()) {
     const row = document.createElement("tr");
@@ -761,6 +718,20 @@ importModal.addEventListener("click", (event) => {
   }
 });
 
+userManualButton.addEventListener("click", () => {
+  openUserManualModal();
+});
+
+userManualCloseButton.addEventListener("click", () => {
+  closeUserManualModal();
+});
+
+userManualModal.addEventListener("click", (event) => {
+  if (event.target === userManualModal) {
+    closeUserManualModal();
+  }
+});
+
 settingsButton.addEventListener("click", async () => {
   settingsButton.disabled = true;
   try {
@@ -804,21 +775,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     closeImportModal();
     closeSettingsModal();
-  }
-});
-
-generateTestAlertsButton.addEventListener("click", async () => {
-  generateTestAlertsButton.disabled = true;
-  try {
-    await generateTestAlerts();
-  } catch (error) {
-    showImportModal(
-      "生成失败",
-      error instanceof Error ? error.message : "生成测试报警失败。",
-      "error",
-    );
-  } finally {
-    generateTestAlertsButton.disabled = false;
+    closeUserManualModal();
   }
 });
 
@@ -840,6 +797,12 @@ alertNextPageButton.addEventListener("click", () => {
 
 sourceTab.addEventListener("click", () => {
   setActivePanel("source");
+});
+
+sourceStatusFilter.addEventListener("change", () => {
+  sourceStatusFilterValue = sourceStatusFilter.value as SourceStatusFilter;
+  sourcePaginationState.currentPage = 1;
+  loadDashboardData();
 });
 
 sourcePrevPageButton.addEventListener("click", () => {
