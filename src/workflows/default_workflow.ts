@@ -15,6 +15,10 @@
  *   - zeroedProducts: number
  *   - alertRecordsCreated: number
  *   - errors: array
+ * 
+ * version:
+ * - 1
+ * 
  * ---
  */
 
