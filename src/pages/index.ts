@@ -27,12 +27,30 @@ type PaginationControls = {
   prevButton: HTMLButtonElement;
   nextButton: HTMLButtonElement;
 };
+type PageState = {
+  activePanel: ActivePanel;
+  alertPage: number;
+  sourcePage: number;
+  productPage: number;
+  sourceStatus: SourceStatusFilter;
+  productName: string;
+  productUrl: string;
+};
 
 const SOURCE_URL_COLUMN = "上游1";
+const PAGE_STATE_STORAGE_KEY = "product-monitor-page-state";
 const PAGE_SIZE = 20;
+const ACTIVE_PANEL_VALUES: ActivePanel[] = ["alert", "source", "product"];
+const SOURCE_STATUS_FILTER_VALUES: SourceStatusFilter[] = [
+  "all",
+  "normal",
+  "invalid",
+  "error",
+];
 const alertPaginationState: PaginationState = { currentPage: 1 };
 const sourcePaginationState: PaginationState = { currentPage: 1 };
 const productPaginationState: PaginationState = { currentPage: 1 };
+let activePanel: ActivePanel = "alert";
 let sourceStatusFilterValue: SourceStatusFilter = "all";
 const ALERT_HIT_TYPE_LABELS: Record<ProductAlertHitType, string> = {
   missing: "商品缺失",
@@ -168,6 +186,95 @@ function getElement<T extends HTMLElement>(id: string): T {
   return element as T;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isActivePanel(value: unknown): value is ActivePanel {
+  return ACTIVE_PANEL_VALUES.includes(value as ActivePanel);
+}
+
+function isSourceStatusFilter(value: unknown): value is SourceStatusFilter {
+  return SOURCE_STATUS_FILTER_VALUES.includes(value as SourceStatusFilter);
+}
+
+function parseSavedPage(value: unknown): number {
+  const page = typeof value === "number" ? value : Number(value);
+  return Number.isInteger(page) && page >= 1 ? page : 1;
+}
+
+function defaultPageState(): PageState {
+  return {
+    activePanel: "alert",
+    alertPage: 1,
+    sourcePage: 1,
+    productPage: 1,
+    sourceStatus: "all",
+    productName: "",
+    productUrl: "",
+  };
+}
+
+function readPageState(): PageState {
+  const defaults = defaultPageState();
+  try {
+    const rawState = window.localStorage.getItem(PAGE_STATE_STORAGE_KEY);
+    if (!rawState) return defaults;
+
+    const parsedState: unknown = JSON.parse(rawState);
+    if (!isRecord(parsedState)) return defaults;
+
+    return {
+      activePanel: isActivePanel(parsedState.activePanel)
+        ? parsedState.activePanel
+        : defaults.activePanel,
+      alertPage: parseSavedPage(parsedState.alertPage),
+      sourcePage: parseSavedPage(parsedState.sourcePage),
+      productPage: parseSavedPage(parsedState.productPage),
+      sourceStatus: isSourceStatusFilter(parsedState.sourceStatus)
+        ? parsedState.sourceStatus
+        : defaults.sourceStatus,
+      productName:
+        typeof parsedState.productName === "string" ? parsedState.productName : "",
+      productUrl:
+        typeof parsedState.productUrl === "string" ? parsedState.productUrl : "",
+    };
+  } catch {
+    return defaults;
+  }
+}
+
+function savePageState() {
+  const state: PageState = {
+    activePanel,
+    alertPage: alertPaginationState.currentPage,
+    sourcePage: sourcePaginationState.currentPage,
+    productPage: productPaginationState.currentPage,
+    sourceStatus: sourceStatusFilterValue,
+    productName: nameFilter.value,
+    productUrl: urlFilter.value,
+  };
+
+  try {
+    window.localStorage.setItem(PAGE_STATE_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // Ignore storage failures so private browsing or blocked storage does not break the page.
+  }
+}
+
+function restorePageState(): ActivePanel {
+  const state = readPageState();
+  activePanel = state.activePanel;
+  alertPaginationState.currentPage = state.alertPage;
+  sourcePaginationState.currentPage = state.sourcePage;
+  productPaginationState.currentPage = state.productPage;
+  sourceStatusFilterValue = state.sourceStatus;
+  sourceStatusFilter.value = sourceStatusFilterValue;
+  nameFilter.value = state.productName;
+  urlFilter.value = state.productUrl;
+  return state.activePanel;
+}
+
 function showImportModal(
   title: string,
   message: string,
@@ -209,7 +316,8 @@ function showSettingsError(message: string) {
   settingsError.hidden = false;
 }
 
-function setActivePanel(panel: ActivePanel) {
+function setActivePanel(panel: ActivePanel, persist = true) {
+  activePanel = panel;
   const isAlert = panel === "alert";
   const isSource = panel === "source";
   const isProduct = panel === "product";
@@ -224,6 +332,10 @@ function setActivePanel(panel: ActivePanel) {
   sourceTab.setAttribute("aria-selected", String(isSource));
   productTab.classList.toggle("active", isProduct);
   productTab.setAttribute("aria-selected", String(isProduct));
+
+  if (persist) {
+    savePageState();
+  }
 }
 
 function parseIntegerInput(input: HTMLInputElement, label: string): number {
@@ -362,6 +474,7 @@ function renderPagination(
     controls.jumpButton.disabled = true;
     controls.prevButton.disabled = true;
     controls.nextButton.disabled = true;
+    savePageState();
     return;
   }
 
@@ -373,6 +486,7 @@ function renderPagination(
   controls.jumpButton.disabled = false;
   controls.prevButton.disabled = state.currentPage <= 1;
   controls.nextButton.disabled = state.currentPage >= pageCount;
+  savePageState();
 }
 
 function jumpToPage(
@@ -389,6 +503,7 @@ function jumpToPage(
   const maxPage = Number.parseInt(controls.jumpInput.max, 10);
   const normalizedMaxPage = Number.isFinite(maxPage) && maxPage > 0 ? maxPage : 1;
   state.currentPage = Math.min(Math.max(requestedPage, 1), normalizedMaxPage);
+  savePageState();
   refresh();
 }
 
@@ -859,11 +974,13 @@ alertTab.addEventListener("click", () => {
 alertPrevPageButton.addEventListener("click", () => {
   if (alertPaginationState.currentPage <= 1) return;
   alertPaginationState.currentPage -= 1;
+  savePageState();
   renderAlertsFromDb();
 });
 
 alertNextPageButton.addEventListener("click", () => {
   alertPaginationState.currentPage += 1;
+  savePageState();
   renderAlertsFromDb();
 });
 
@@ -876,17 +993,20 @@ sourceTab.addEventListener("click", () => {
 sourceStatusFilter.addEventListener("change", () => {
   sourceStatusFilterValue = sourceStatusFilter.value as SourceStatusFilter;
   sourcePaginationState.currentPage = 1;
+  savePageState();
   loadDashboardData();
 });
 
 sourcePrevPageButton.addEventListener("click", () => {
   if (sourcePaginationState.currentPage <= 1) return;
   sourcePaginationState.currentPage -= 1;
+  savePageState();
   loadDashboardData();
 });
 
 sourceNextPageButton.addEventListener("click", () => {
   sourcePaginationState.currentPage += 1;
+  savePageState();
   loadDashboardData();
 });
 
@@ -895,11 +1015,13 @@ bindPageJump(sourcePaginationControls, sourcePaginationState, loadDashboardData)
 productPrevPageButton.addEventListener("click", () => {
   if (productPaginationState.currentPage <= 1) return;
   productPaginationState.currentPage -= 1;
+  savePageState();
   renderProductsFromDb();
 });
 
 productNextPageButton.addEventListener("click", () => {
   productPaginationState.currentPage += 1;
+  savePageState();
   renderProductsFromDb();
 });
 
@@ -912,13 +1034,16 @@ productTab.addEventListener("click", () => {
 
 nameFilter.addEventListener("input", () => {
   productPaginationState.currentPage = 1;
+  savePageState();
   renderProductsFromDb();
 });
 
 urlFilter.addEventListener("input", () => {
   productPaginationState.currentPage = 1;
+  savePageState();
   renderProductsFromDb();
 });
 
-setActivePanel("alert");
+const restoredPanel = restorePageState();
+setActivePanel(restoredPanel, false);
 loadDashboardData();
