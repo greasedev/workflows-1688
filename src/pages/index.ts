@@ -22,6 +22,8 @@ type PaginationState = {
 type PaginationControls = {
   container: HTMLElement;
   info: HTMLElement;
+  jumpInput: HTMLInputElement;
+  jumpButton: HTMLButtonElement;
   prevButton: HTMLButtonElement;
   nextButton: HTMLButtonElement;
 };
@@ -87,6 +89,8 @@ const alertRows = getElement<HTMLTableSectionElement>("alertRows");
 const alertEmpty = getElement<HTMLDivElement>("alertEmpty");
 const alertPagination = getElement<HTMLDivElement>("alertPagination");
 const alertPaginationInfo = getElement<HTMLSpanElement>("alertPaginationInfo");
+const alertPageJumpInput = getElement<HTMLInputElement>("alertPageJumpInput");
+const alertPageJumpButton = getElement<HTMLButtonElement>("alertPageJumpButton");
 const alertPrevPageButton = getElement<HTMLButtonElement>(
   "alertPrevPageButton",
 );
@@ -98,6 +102,10 @@ const sourceEmpty = getElement<HTMLDivElement>("sourceEmpty");
 const sourcePagination = getElement<HTMLDivElement>("sourcePagination");
 const sourcePaginationInfo = getElement<HTMLSpanElement>("sourcePaginationInfo");
 const sourceStatusFilter = getElement<HTMLSelectElement>("sourceStatusFilter");
+const sourcePageJumpInput = getElement<HTMLInputElement>("sourcePageJumpInput");
+const sourcePageJumpButton = getElement<HTMLButtonElement>(
+  "sourcePageJumpButton",
+);
 const sourcePrevPageButton = getElement<HTMLButtonElement>(
   "sourcePrevPageButton",
 );
@@ -116,6 +124,10 @@ const productPagination = getElement<HTMLDivElement>("productPagination");
 const productPaginationInfo = getElement<HTMLSpanElement>(
   "productPaginationInfo",
 );
+const productPageJumpInput = getElement<HTMLInputElement>("productPageJumpInput");
+const productPageJumpButton = getElement<HTMLButtonElement>(
+  "productPageJumpButton",
+);
 const productPrevPageButton = getElement<HTMLButtonElement>(
   "productPrevPageButton",
 );
@@ -126,18 +138,24 @@ const productSearchPanel = getElement<HTMLElement>("productSearchPanel");
 const alertPaginationControls: PaginationControls = {
   container: alertPagination,
   info: alertPaginationInfo,
+  jumpInput: alertPageJumpInput,
+  jumpButton: alertPageJumpButton,
   prevButton: alertPrevPageButton,
   nextButton: alertNextPageButton,
 };
 const sourcePaginationControls: PaginationControls = {
   container: sourcePagination,
   info: sourcePaginationInfo,
+  jumpInput: sourcePageJumpInput,
+  jumpButton: sourcePageJumpButton,
   prevButton: sourcePrevPageButton,
   nextButton: sourceNextPageButton,
 };
 const productPaginationControls: PaginationControls = {
   container: productPagination,
   info: productPaginationInfo,
+  jumpInput: productPageJumpInput,
+  jumpButton: productPageJumpButton,
   prevButton: productPrevPageButton,
   nextButton: productNextPageButton,
 };
@@ -338,17 +356,57 @@ function renderPagination(
 ) {
   controls.container.hidden = totalItems === 0;
   if (totalItems === 0) {
-    controls.info.textContent = "0-0 / 0";
+    controls.info.textContent = "第 0 / 0 页";
+    controls.jumpInput.value = "";
+    controls.jumpInput.disabled = true;
+    controls.jumpButton.disabled = true;
     controls.prevButton.disabled = true;
     controls.nextButton.disabled = true;
     return;
   }
 
-  const start = pageStartIndex(state) + 1;
-  const end = Math.min(state.currentPage * PAGE_SIZE, totalItems);
-  controls.info.textContent = `${start}-${end} / ${totalItems}`;
+  const pageCount = totalPages(totalItems);
+  controls.info.textContent = `第 ${state.currentPage} / ${pageCount} 页`;
+  controls.jumpInput.value = String(state.currentPage);
+  controls.jumpInput.max = String(pageCount);
+  controls.jumpInput.disabled = false;
+  controls.jumpButton.disabled = false;
   controls.prevButton.disabled = state.currentPage <= 1;
-  controls.nextButton.disabled = state.currentPage >= totalPages(totalItems);
+  controls.nextButton.disabled = state.currentPage >= pageCount;
+}
+
+function jumpToPage(
+  controls: PaginationControls,
+  state: PaginationState,
+  refresh: () => void,
+) {
+  const requestedPage = Number.parseInt(controls.jumpInput.value, 10);
+  if (!Number.isFinite(requestedPage)) {
+    controls.jumpInput.value = String(state.currentPage);
+    return;
+  }
+
+  const maxPage = Number.parseInt(controls.jumpInput.max, 10);
+  const normalizedMaxPage = Number.isFinite(maxPage) && maxPage > 0 ? maxPage : 1;
+  state.currentPage = Math.min(Math.max(requestedPage, 1), normalizedMaxPage);
+  refresh();
+}
+
+function bindPageJump(
+  controls: PaginationControls,
+  state: PaginationState,
+  refresh: () => void,
+) {
+  controls.jumpButton.addEventListener("click", () => {
+    jumpToPage(controls, state, refresh);
+  });
+
+  controls.jumpInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      jumpToPage(controls, state, refresh);
+    }
+  });
 }
 
 function updateProductResultSummary(count: number) {
@@ -521,8 +579,22 @@ function filterSourcesByStatus(sources: Source[]): Source[] {
   return sources.filter((source) => sourceStatus(source) === sourceStatusFilterValue);
 }
 
+function sourceCheckedTime(source: Source): number {
+  if (!source.lastCheckedAt) return Number.NEGATIVE_INFINITY;
+  const timestamp = new Date(source.lastCheckedAt).getTime();
+  return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
+}
+
+function sortSourcesByLastChecked(sources: Source[]): Source[] {
+  return [...sources].sort((a, b) => {
+    const timeDiff = sourceCheckedTime(b) - sourceCheckedTime(a);
+    return timeDiff || (b.id ?? 0) - (a.id ?? 0);
+  });
+}
+
 function renderSources(sources: Source[], countsByUrl: Map<string, number>) {
-  const filteredSources = filterSourcesByStatus(sources);
+  const sortedSources = sortSourcesByLastChecked(sources);
+  const filteredSources = filterSourcesByStatus(sortedSources);
 
   sourceRows.textContent = "";
   sourceEmpty.textContent =
@@ -795,6 +867,8 @@ alertNextPageButton.addEventListener("click", () => {
   renderAlertsFromDb();
 });
 
+bindPageJump(alertPaginationControls, alertPaginationState, renderAlertsFromDb);
+
 sourceTab.addEventListener("click", () => {
   setActivePanel("source");
 });
@@ -816,6 +890,8 @@ sourceNextPageButton.addEventListener("click", () => {
   loadDashboardData();
 });
 
+bindPageJump(sourcePaginationControls, sourcePaginationState, loadDashboardData);
+
 productPrevPageButton.addEventListener("click", () => {
   if (productPaginationState.currentPage <= 1) return;
   productPaginationState.currentPage -= 1;
@@ -826,6 +902,8 @@ productNextPageButton.addEventListener("click", () => {
   productPaginationState.currentPage += 1;
   renderProductsFromDb();
 });
+
+bindPageJump(productPaginationControls, productPaginationState, renderProductsFromDb);
 
 productTab.addEventListener("click", () => {
   setActivePanel("product");

@@ -99,8 +99,14 @@
         </table>
         <div class="empty-state" id="alertEmpty">暂无监控报警。</div>
         <div class="pagination" id="alertPagination" hidden>
-          <span class="pagination-info" id="alertPaginationInfo">0-0 / 0</span>
+          <span class="pagination-info" id="alertPaginationInfo">第 0 / 0 页</span>
           <div class="pagination-actions">
+            <label class="page-jump-control" for="alertPageJumpInput">
+              <span>跳至</span>
+              <input id="alertPageJumpInput" type="number" min="1" step="1" inputmode="numeric" />
+              <span>页</span>
+            </label>
+            <button class="btn btn-secondary" id="alertPageJumpButton" type="button">跳转</button>
             <button class="btn btn-secondary" id="alertPrevPageButton" type="button">上一页</button>
             <button class="btn btn-secondary" id="alertNextPageButton" type="button">下一页</button>
           </div>
@@ -133,8 +139,14 @@
         </table>
         <div class="empty-state" id="sourceEmpty">暂无监控 URL，请先导入 Excel。</div>
         <div class="pagination" id="sourcePagination" hidden>
-          <span class="pagination-info" id="sourcePaginationInfo">0-0 / 0</span>
+          <span class="pagination-info" id="sourcePaginationInfo">第 0 / 0 页</span>
           <div class="pagination-actions">
+            <label class="page-jump-control" for="sourcePageJumpInput">
+              <span>跳至</span>
+              <input id="sourcePageJumpInput" type="number" min="1" step="1" inputmode="numeric" />
+              <span>页</span>
+            </label>
+            <button class="btn btn-secondary" id="sourcePageJumpButton" type="button">跳转</button>
             <button class="btn btn-secondary" id="sourcePrevPageButton" type="button">上一页</button>
             <button class="btn btn-secondary" id="sourceNextPageButton" type="button">下一页</button>
           </div>
@@ -163,8 +175,14 @@
         </table>
         <div class="empty-state" id="productEmpty">请输入商品名称或 URL 查询。</div>
         <div class="pagination" id="productPagination" hidden>
-          <span class="pagination-info" id="productPaginationInfo">0-0 / 0</span>
+          <span class="pagination-info" id="productPaginationInfo">第 0 / 0 页</span>
           <div class="pagination-actions">
+            <label class="page-jump-control" for="productPageJumpInput">
+              <span>跳至</span>
+              <input id="productPageJumpInput" type="number" min="1" step="1" inputmode="numeric" />
+              <span>页</span>
+            </label>
+            <button class="btn btn-secondary" id="productPageJumpButton" type="button">跳转</button>
             <button class="btn btn-secondary" id="productPrevPageButton" type="button">上一页</button>
             <button class="btn btn-secondary" id="productNextPageButton" type="button">下一页</button>
           </div>
