@@ -16,6 +16,8 @@
  *   - alertRecordsCreated: number
  *   - errors: array
  * 
+ * Failed URLs are retried once after the first pass completes.
+ * 
  * version:
  * - 1
  * 
@@ -38,6 +40,10 @@ type SourceProcessResult = Pick<
   WorkflowSummary,
   'succeededUrls' | 'failedUrls' | 'updatedProducts' | 'zeroedProducts' | 'alertRecordsCreated' | 'errors'
 >;
+type ProcessedSourceResult = {
+  source: Source;
+  result: SourceProcessResult;
+};
 
 const ARRAY_KEYS = ['products', 'skus', 'data', 'items', 'list', 'result'];
 const NAME_KEYS = ['name', 'title', 'productName', 'skuName', '商品名称', '商品名字', '名称'];
@@ -377,6 +383,40 @@ async function processSource(
   return resultSummary;
 }
 
+async function processSourceBatches(
+  sources: Source[],
+  batchSize: number,
+  apis: WorkflowApis,
+  db: Dexie,
+  sourceTable: SourceTable,
+  productTable: ProductTable,
+  productAlertTable: ProductAlertTable,
+  stockAlertThreshold: number,
+): Promise<ProcessedSourceResult[]> {
+  const processedResults: ProcessedSourceResult[] = [];
+  const batches = chunkSources(sources, batchSize);
+
+  for (const batch of batches) {
+    const batchResults = await Promise.all(
+      batch.map(async (source) => ({
+        source,
+        result: await processSource(
+          source,
+          apis,
+          db,
+          sourceTable,
+          productTable,
+          productAlertTable,
+          stockAlertThreshold,
+        ),
+      })),
+    );
+    processedResults.push(...batchResults);
+  }
+
+  return processedResults;
+}
+
 // Main workflow entry point
 export async function execute(context: WorkflowContext): Promise<WorkflowResult> {
   const agent = new Agent(context.agentOptions || {});
@@ -404,27 +444,48 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
   console.log("Params:", context.params);
   console.log('Executing product monitor workflow...');
 
-  const batches = chunkSources(sources, settings.monitorMaxConcurrency);
-  for (const batch of batches) {
-    const batchResults = await Promise.all(
-      batch.map((source) => processSource(
-        source,
-        apis,
-        db,
-        sourceTable,
-        productTable,
-        productAlertTable,
-        settings.stockAlertThreshold,
-      )),
-    );
-    for (const batchResult of batchResults) {
-      applyProcessResult(summary, batchResult);
+  const firstPassResults = await processSourceBatches(
+    sources,
+    settings.monitorMaxConcurrency,
+    apis,
+    db,
+    sourceTable,
+    productTable,
+    productAlertTable,
+    settings.stockAlertThreshold,
+  );
+  const failedSources = firstPassResults
+    .filter(({ result }) => result.failedUrls > 0)
+    .map(({ source }) => source);
+
+  for (const { result } of firstPassResults) {
+    if (result.succeededUrls > 0) {
+      applyProcessResult(summary, result);
     }
   }
 
+  if (failedSources.length > 0) {
+    const retryResults = await processSourceBatches(
+      failedSources,
+      settings.monitorMaxConcurrency,
+      apis,
+      db,
+      sourceTable,
+      productTable,
+      productAlertTable,
+      settings.stockAlertThreshold,
+    );
+
+    for (const { result } of retryResults) {
+      applyProcessResult(summary, result);
+    }
+  }
+
+  const firstPassBatchCount = chunkSources(sources, settings.monitorMaxConcurrency).length;
+  const retryBatchCount = chunkSources(failedSources, settings.monitorMaxConcurrency).length;
   const result: WorkflowResult & { data: WorkflowSummary } = {
     success: summary.failedUrls === 0,
-    message: `Workflow completed in ${batches.length} batches of up to ${settings.monitorMaxConcurrency}: ${summary.succeededUrls}/${summary.totalUrls} URLs succeeded, ${summary.skippedInvalidUrls} invalid URLs skipped, ${summary.updatedProducts} products updated, ${summary.zeroedProducts} products marked out of stock, ${summary.alertRecordsCreated} alert records created.`,
+    message: `Workflow completed in ${firstPassBatchCount} batches of up to ${settings.monitorMaxConcurrency}; retried ${failedSources.length} failed URLs in ${retryBatchCount} retry batches: ${summary.succeededUrls}/${summary.totalUrls} URLs succeeded, ${summary.failedUrls} URLs failed, ${summary.skippedInvalidUrls} invalid URLs skipped, ${summary.updatedProducts} products updated, ${summary.zeroedProducts} products marked out of stock, ${summary.alertRecordsCreated} alert records created.`,
     data: summary,
   };
 
