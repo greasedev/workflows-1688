@@ -45,15 +45,28 @@ const SPEC_KEYS = ['spec', 'specification', '规格', '商品规格'];
 const PRICE_KEYS = ['price', 'salePrice', 'offerPrice', 'amount', '价格', '售价'];
 const STOCK_KEYS = ['stock', 'inventory', 'quantity', '库存', '库存数', '数量'];
 
+class WorkflowUserError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'WorkflowUserError';
+  }
+}
+
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  if (error instanceof WorkflowUserError) {
+    return error.message;
+  }
+  if (error instanceof Error) {
+    return `商品监控处理失败：${error.message}`;
+  }
+  return `商品监控处理失败：${String(error)}`;
 }
 
 function parseJsonValue(value: string): unknown {
   try {
     return JSON.parse(value);
   } catch {
-    throw new Error('API extract_data is not valid JSON');
+    throw new WorkflowUserError('商品提取结果不是有效的 JSON。');
   }
 }
 
@@ -211,21 +224,23 @@ function buildProductAlerts(
 
 function extractProducts(result: ExecutionResult, url: string, updatedAt: string): Product[] {
   if (!result.success) {
-    throw new Error(result.error || 'API call failed');
+    throw new WorkflowUserError(
+      result.error ? `商品提取接口调用失败：${result.error}` : '商品提取接口调用失败。',
+    );
   }
 
   if (!result.task?.extract_data) {
-    throw new Error('API response did not include extract_data');
+    throw new WorkflowUserError('商品提取接口未返回提取结果。');
   }
 
   const rawProducts = findProductArray(result.task.extract_data);
   if (rawProducts.length === 0) {
-    throw new Error('API response did not include a recognizable product array');
+    throw new WorkflowUserError('商品提取结果中未找到可识别的商品列表。');
   }
 
   const products = normalizeProducts(rawProducts, url, updatedAt);
   if (products.length === 0) {
-    throw new Error('API product array did not include any valid products');
+    throw new WorkflowUserError('商品列表中没有可写入的有效商品。');
   }
 
   return products;
@@ -354,7 +369,7 @@ async function processSource(
     } catch (statusError) {
       resultSummary.errors.push({
         url: source.url,
-        message: `Failed to record URL error status: ${errorMessage(statusError)}`,
+        message: `记录 URL 错误状态失败：${errorMessage(statusError)}`,
       });
     }
   }

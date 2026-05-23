@@ -12,6 +12,7 @@ type ImportStats = {
   added: number;
   duplicate: number;
   invalid: number;
+  non1688: number;
 };
 
 type ActivePanel = "alert" | "source" | "product";
@@ -380,18 +381,25 @@ function parseSettingsForm(): Pick<
   };
 }
 
-function normalizeUrl(value: unknown): string | null {
+function is1688Hostname(hostname: string): boolean {
+  return hostname === "1688.com" || hostname.endsWith(".1688.com");
+}
+
+function normalizeImportUrl(value: unknown): { url: string | null; isValidUrl: boolean } {
   const url = String(value ?? "").trim();
-  if (!url) return null;
+  if (!url) return { url: null, isValidUrl: false };
 
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      return null;
+      return { url: null, isValidUrl: false };
     }
-    return parsed.href;
+    if (!is1688Hostname(parsed.hostname.toLowerCase())) {
+      return { url: null, isValidUrl: true };
+    }
+    return { url: parsed.href, isValidUrl: true };
   } catch {
-    return null;
+    return { url: null, isValidUrl: false };
   }
 }
 
@@ -560,12 +568,16 @@ async function importExcel(file: File): Promise<ImportStats> {
   const seenUrls = new Set<string>();
   const now = new Date().toISOString();
   const newSources: Source[] = [];
-  const stats: ImportStats = { added: 0, duplicate: 0, invalid: 0 };
+  const stats: ImportStats = { added: 0, duplicate: 0, invalid: 0, non1688: 0 };
 
   for (const row of rows) {
-    const url = normalizeUrl(row[SOURCE_URL_COLUMN]);
+    const { url, isValidUrl } = normalizeImportUrl(row[SOURCE_URL_COLUMN]);
     if (!url) {
-      stats.invalid += 1;
+      if (isValidUrl) {
+        stats.non1688 += 1;
+      } else {
+        stats.invalid += 1;
+      }
       continue;
     }
 
@@ -880,7 +892,7 @@ excelInput.addEventListener("change", async () => {
     const stats = await importExcel(file);
     showImportModal(
       "导入完成",
-      `新增 URL：${stats.added} 个\n重复 URL：${stats.duplicate} 个\n无效或空值：${stats.invalid} 个`,
+      `新增 URL：${stats.added} 个\n重复 URL：${stats.duplicate} 个\n无效或空值：${stats.invalid} 个\n非1688 URL：${stats.non1688} 个`,
       "success",
     );
     await loadDashboardData();
