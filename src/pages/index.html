@@ -90,7 +90,17 @@
             <tr>
               <th style="width: 6%;">No.</th>
               <th style="width: 30%;">商品信息</th>
-              <th style="width: 21%;">命中类型</th>
+              <th style="width: 21%;">
+                <label class="table-head-filter" for="alertHitTypeFilter">
+                  <span>命中类型</span>
+                  <select id="alertHitTypeFilter" aria-label="筛选报警命中类型">
+                    <option value="all" selected>全部</option>
+                    <option value="missing">商品缺失</option>
+                    <option value="price_increase">价格上涨</option>
+                    <option value="low_stock">低库存</option>
+                  </select>
+                </label>
+              </th>
               <th style="width: 29%;">来源 URL</th>
               <th style="width: 14%;">检查时间</th>
             </tr>
@@ -122,7 +132,7 @@
               <th style="width: 12%;">商品数</th>
               <th style="width: 15%;">最近检查</th>
               <th style="width: 13%;">
-                <label class="source-status-filter" for="sourceStatusFilter">
+                <label class="table-head-filter" for="sourceStatusFilter">
                   <span>状态</span>
                   <select id="sourceStatusFilter" aria-label="筛选 URL 状态">
                     <option value="all" selected>全部</option>

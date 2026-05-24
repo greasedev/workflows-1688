@@ -17,6 +17,7 @@ type ImportStats = {
 
 type ActivePanel = "alert" | "source" | "product";
 type SourceStatusFilter = "all" | "normal" | "invalid" | "error";
+type AlertHitTypeFilter = "all" | ProductAlertHitType;
 type PaginationState = {
   currentPage: number;
 };
@@ -33,6 +34,7 @@ type PageState = {
   alertPage: number;
   sourcePage: number;
   productPage: number;
+  alertHitType: AlertHitTypeFilter;
   sourceStatus: SourceStatusFilter;
   productName: string;
   productUrl: string;
@@ -48,10 +50,17 @@ const SOURCE_STATUS_FILTER_VALUES: SourceStatusFilter[] = [
   "invalid",
   "error",
 ];
+const ALERT_HIT_TYPE_FILTER_VALUES: AlertHitTypeFilter[] = [
+  "all",
+  "missing",
+  "price_increase",
+  "low_stock",
+];
 const alertPaginationState: PaginationState = { currentPage: 1 };
 const sourcePaginationState: PaginationState = { currentPage: 1 };
 const productPaginationState: PaginationState = { currentPage: 1 };
 let activePanel: ActivePanel = "alert";
+let alertHitTypeFilterValue: AlertHitTypeFilter = "all";
 let sourceStatusFilterValue: SourceStatusFilter = "all";
 const ALERT_HIT_TYPE_LABELS: Record<ProductAlertHitType, string> = {
   missing: "商品缺失",
@@ -106,6 +115,7 @@ const sourcePanel = getElement<HTMLElement>("sourcePanel");
 const productPanel = getElement<HTMLElement>("productPanel");
 const alertRows = getElement<HTMLTableSectionElement>("alertRows");
 const alertEmpty = getElement<HTMLDivElement>("alertEmpty");
+const alertHitTypeFilter = getElement<HTMLSelectElement>("alertHitTypeFilter");
 const alertPagination = getElement<HTMLDivElement>("alertPagination");
 const alertPaginationInfo = getElement<HTMLSpanElement>("alertPaginationInfo");
 const alertPageJumpInput = getElement<HTMLInputElement>("alertPageJumpInput");
@@ -199,6 +209,10 @@ function isSourceStatusFilter(value: unknown): value is SourceStatusFilter {
   return SOURCE_STATUS_FILTER_VALUES.includes(value as SourceStatusFilter);
 }
 
+function isAlertHitTypeFilter(value: unknown): value is AlertHitTypeFilter {
+  return ALERT_HIT_TYPE_FILTER_VALUES.includes(value as AlertHitTypeFilter);
+}
+
 function parseSavedPage(value: unknown): number {
   const page = typeof value === "number" ? value : Number(value);
   return Number.isInteger(page) && page >= 1 ? page : 1;
@@ -210,6 +224,7 @@ function defaultPageState(): PageState {
     alertPage: 1,
     sourcePage: 1,
     productPage: 1,
+    alertHitType: "all",
     sourceStatus: "all",
     productName: "",
     productUrl: "",
@@ -232,6 +247,9 @@ function readPageState(): PageState {
       alertPage: parseSavedPage(parsedState.alertPage),
       sourcePage: parseSavedPage(parsedState.sourcePage),
       productPage: parseSavedPage(parsedState.productPage),
+      alertHitType: isAlertHitTypeFilter(parsedState.alertHitType)
+        ? parsedState.alertHitType
+        : defaults.alertHitType,
       sourceStatus: isSourceStatusFilter(parsedState.sourceStatus)
         ? parsedState.sourceStatus
         : defaults.sourceStatus,
@@ -251,6 +269,7 @@ function savePageState() {
     alertPage: alertPaginationState.currentPage,
     sourcePage: sourcePaginationState.currentPage,
     productPage: productPaginationState.currentPage,
+    alertHitType: alertHitTypeFilterValue,
     sourceStatus: sourceStatusFilterValue,
     productName: nameFilter.value,
     productUrl: urlFilter.value,
@@ -269,6 +288,8 @@ function restorePageState(): ActivePanel {
   alertPaginationState.currentPage = state.alertPage;
   sourcePaginationState.currentPage = state.sourcePage;
   productPaginationState.currentPage = state.productPage;
+  alertHitTypeFilterValue = state.alertHitType;
+  alertHitTypeFilter.value = alertHitTypeFilterValue;
   sourceStatusFilterValue = state.sourceStatus;
   sourceStatusFilter.value = sourceStatusFilterValue;
   nameFilter.value = state.productName;
@@ -630,16 +651,24 @@ async function renderAlertsFromDb() {
 function renderAlerts(alerts: ProductAlert[]) {
   alertCount.textContent = String(alerts.length);
   alertRows.textContent = "";
-  alertEmpty.classList.toggle("visible", alerts.length === 0);
-  normalizePage(alertPaginationState, alerts.length);
-  renderPagination(alertPaginationControls, alertPaginationState, alerts.length);
 
   const sortedAlerts = [...alerts].sort((a, b) => {
     const timeDiff = new Date(b.checkedAt).getTime() - new Date(a.checkedAt).getTime();
     return timeDiff || (b.id ?? 0) - (a.id ?? 0);
   });
+  const filteredAlerts =
+    alertHitTypeFilterValue === "all"
+      ? sortedAlerts
+      : sortedAlerts.filter((alert) => alert.hitTypes.includes(alertHitTypeFilterValue));
+
+  alertEmpty.textContent =
+    alerts.length === 0 ? "暂无监控报警。" : "当前命中类型筛选下暂无监控报警。";
+  alertEmpty.classList.toggle("visible", filteredAlerts.length === 0);
+  normalizePage(alertPaginationState, filteredAlerts.length);
+  renderPagination(alertPaginationControls, alertPaginationState, filteredAlerts.length);
+
   const startIndex = pageStartIndex(alertPaginationState);
-  const pageAlerts = sortedAlerts.slice(startIndex, startIndex + PAGE_SIZE);
+  const pageAlerts = filteredAlerts.slice(startIndex, startIndex + PAGE_SIZE);
 
   for (const [index, alert] of pageAlerts.entries()) {
     const row = document.createElement("tr");
@@ -997,6 +1026,13 @@ alertNextPageButton.addEventListener("click", () => {
 });
 
 bindPageJump(alertPaginationControls, alertPaginationState, renderAlertsFromDb);
+
+alertHitTypeFilter.addEventListener("change", () => {
+  alertHitTypeFilterValue = alertHitTypeFilter.value as AlertHitTypeFilter;
+  alertPaginationState.currentPage = 1;
+  savePageState();
+  renderAlertsFromDb();
+});
 
 sourceTab.addEventListener("click", () => {
   setActivePanel("source");

@@ -197,7 +197,7 @@ URL 监控列表交互：
   - 使用 `[name+spec+url]` 构建历史商品 Map 和本次商品 Map。
   - 历史商品本次不存在且历史库存不为 `0` 时，追加 `missing` 命中记录。
   - 历史商品价格低于本次价格时，追加 `price_increase` 命中记录。
-  - 本次商品库存小于 `stockAlertThreshold` 时，追加 `low_stock` 命中记录；库存等于阈值不命中。
+  - 本次商品库存小于 `stockAlertThreshold`，且无历史商品或历史库存不小于该阈值时，追加 `low_stock` 命中记录；库存等于阈值不命中。
   - 本次 API 返回的新品如果库存小于 `stockAlertThreshold`，也需要追加 `low_stock` 命中记录。
   - 同一商品同一轮命中多种情况时，只写入一条 `ProductAlert`，`hitTypes` 保存全部命中类型。
   - 商品命中记录采用追加模式，不覆盖历史记录。
@@ -275,9 +275,9 @@ URL 监控列表交互：
 - 工作流重新抓取后，历史商品本次缺失且历史库存不为 `0` 时，`product_alert` 追加 `missing` 记录。
 - 工作流重新抓取后，历史商品已是 `stock = 0` 且本次仍缺失时，不重复追加 `missing` 记录。
 - 工作流发现历史商品价格低于本次价格时，`product_alert` 追加 `price_increase` 记录。
-- 工作流发现本次商品库存小于数据库中的 `stockAlertThreshold` 时，`product_alert` 追加 `low_stock` 记录；库存等于阈值时不追加。
+- 工作流发现本次商品库存小于数据库中的 `stockAlertThreshold`，且无历史商品或历史库存不小于该阈值时，`product_alert` 追加 `low_stock` 记录；库存等于阈值时不追加。
 - 同一商品同时价格上涨且低库存时，`product_alert` 只新增一条记录，`hitTypes` 同时包含 `price_increase` 和 `low_stock`。
-- 重复运行工作流且持续满足命中条件时，`product_alert` 按轮次追加新记录，不覆盖旧记录。
+- 重复运行工作流且持续满足价格上涨等命中条件时，`product_alert` 按轮次追加新记录，不覆盖旧记录；持续低库存状态不重复追加 `low_stock` 记录。
 
 ## 3. 文件级改动清单
 

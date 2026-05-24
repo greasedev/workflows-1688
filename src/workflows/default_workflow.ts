@@ -199,7 +199,11 @@ function buildProductAlerts(
     if (existingProduct && existingProduct.price < currentProduct.price) {
       hitTypes.push('price_increase');
     }
-    if (currentProduct.stock < stockAlertThreshold) {
+    const isCurrentLowStock = currentProduct.stock < stockAlertThreshold;
+    const wasExistingLowStock = existingProduct
+      ? existingProduct.stock < stockAlertThreshold
+      : false;
+    if (isCurrentLowStock && !wasExistingLowStock) {
       hitTypes.push('low_stock');
     }
     if (hitTypes.length === 0) {

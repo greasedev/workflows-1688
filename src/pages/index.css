@@ -361,7 +361,7 @@ tr:last-child td {
   text-decoration: underline;
 }
 
-.source-status-filter {
+.table-head-filter {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -369,7 +369,7 @@ tr:last-child td {
   white-space: nowrap;
 }
 
-.source-status-filter select {
+.table-head-filter select {
   max-width: 80px;
   padding: 4px 8px;
   border: 1px solid var(--border);
