@@ -656,10 +656,11 @@ function renderAlerts(alerts: ProductAlert[]) {
     const timeDiff = new Date(b.checkedAt).getTime() - new Date(a.checkedAt).getTime();
     return timeDiff || (b.id ?? 0) - (a.id ?? 0);
   });
+  const hitTypeFilter = alertHitTypeFilterValue;
   const filteredAlerts =
-    alertHitTypeFilterValue === "all"
+    hitTypeFilter === "all"
       ? sortedAlerts
-      : sortedAlerts.filter((alert) => alert.hitTypes.includes(alertHitTypeFilterValue));
+      : sortedAlerts.filter((alert) => alert.hitTypes.includes(hitTypeFilter));
 
   alertEmpty.textContent =
     alerts.length === 0 ? "暂无监控报警。" : "当前命中类型筛选下暂无监控报警。";
