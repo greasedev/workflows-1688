@@ -100,9 +100,6 @@ const settingsForm = getElement<HTMLFormElement>("settingsForm");
 const settingsCancelButton = getElement<HTMLButtonElement>(
   "settingsCancelButton",
 );
-const monitorMaxConcurrencyInput = getElement<HTMLInputElement>(
-  "monitorMaxConcurrencyInput",
-);
 const stockAlertThresholdInput = getElement<HTMLInputElement>(
   "stockAlertThresholdInput",
 );
@@ -314,7 +311,6 @@ function closeImportModal() {
 
 async function openSettingsModal() {
   const settings = await getAppSettings(settingsTable);
-  monitorMaxConcurrencyInput.value = String(settings.monitorMaxConcurrency);
   stockAlertThresholdInput.value = String(settings.stockAlertThreshold);
   settingsError.hidden = true;
   settingsError.textContent = "";
@@ -368,27 +364,11 @@ function parseIntegerInput(input: HTMLInputElement, label: string): number {
   return value;
 }
 
-function parseSettingsForm(): Pick<
-  AppSettings,
-  "monitorMaxConcurrency" | "stockAlertThreshold"
-> {
-  const monitorMaxConcurrency = parseIntegerInput(
-    monitorMaxConcurrencyInput,
-    "监控最大并发数",
-  );
+function parseSettingsForm(): Pick<AppSettings, "stockAlertThreshold"> {
   const stockAlertThreshold = parseIntegerInput(
     stockAlertThresholdInput,
     "库存预警值",
   );
-
-  if (
-    monitorMaxConcurrency < SETTINGS_LIMITS.monitorMaxConcurrency.min ||
-    monitorMaxConcurrency > SETTINGS_LIMITS.monitorMaxConcurrency.max
-  ) {
-    throw new Error(
-      `监控最大并发数必须在 ${SETTINGS_LIMITS.monitorMaxConcurrency.min}-${SETTINGS_LIMITS.monitorMaxConcurrency.max} 之间。`,
-    );
-  }
 
   if (stockAlertThreshold < SETTINGS_LIMITS.stockAlertThreshold.min) {
     throw new Error(
@@ -397,7 +377,6 @@ function parseSettingsForm(): Pick<
   }
 
   return {
-    monitorMaxConcurrency,
     stockAlertThreshold,
   };
 }

@@ -39,7 +39,9 @@ type SettingsTable = Dexie.Table<AppSettings, string>;
 type SourceProcessResult = Pick<
   WorkflowSummary,
   'succeededUrls' | 'failedUrls' | 'updatedProducts' | 'zeroedProducts' | 'alertRecordsCreated' | 'errors'
->;
+> & {
+  shouldStop?: boolean;
+};
 type ProcessedSourceResult = {
   source: Source;
   result: SourceProcessResult;
@@ -55,6 +57,13 @@ class WorkflowUserError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'WorkflowUserError';
+  }
+}
+
+class WorkflowStopError extends WorkflowUserError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'WorkflowStopError';
   }
 }
 
@@ -74,6 +83,15 @@ function parseJsonValue(value: string): unknown {
   } catch {
     throw new WorkflowUserError('商品提取结果不是有效的 JSON。');
   }
+}
+
+function normalizeExtractData(value: unknown): unknown {
+  return typeof value === 'string' ? parseJsonValue(value) : value;
+}
+
+function isCaptchaRequiredExtractData(value: unknown): boolean {
+  const extractData = normalizeExtractData(value);
+  return Array.isArray(extractData) && extractData[0] === 'captcha-required';
 }
 
 function findProductArray(value: unknown): RawProduct[] {
@@ -243,7 +261,12 @@ function extractProducts(result: ExecutionResult, url: string, updatedAt: string
     throw new WorkflowUserError('商品提取接口未返回提取结果。');
   }
 
-  const rawProducts = findProductArray(result.task.extract_data);
+  const extractData = result.task.extract_data;
+  if (isCaptchaRequiredExtractData(extractData)) {
+    throw new WorkflowStopError('商品提取触发验证码，请人工处理后重试。');
+  }
+
+  const rawProducts = findProductArray(extractData);
   if (rawProducts.length === 0) {
     throw new WorkflowUserError('商品提取结果中未找到可识别的商品列表。');
   }
@@ -277,14 +300,6 @@ function emptySourceProcessResult(): SourceProcessResult {
     alertRecordsCreated: 0,
     errors: [],
   };
-}
-
-function chunkSources(sources: Source[], batchSize: number): Source[][] {
-  const batches: Source[][] = [];
-  for (let index = 0; index < sources.length; index += batchSize) {
-    batches.push(sources.slice(index, index + batchSize));
-  }
-  return batches;
 }
 
 function applyProcessResult(summary: WorkflowSummary, result: SourceProcessResult) {
@@ -366,6 +381,7 @@ async function processSource(
   } catch (error) {
     const message = errorMessage(error);
     resultSummary.failedUrls = 1;
+    resultSummary.shouldStop = error instanceof WorkflowStopError;
     resultSummary.errors.push({ url: source.url, message });
 
     try {
@@ -387,9 +403,8 @@ async function processSource(
   return resultSummary;
 }
 
-async function processSourceBatches(
+async function processSourcesSequentially(
   sources: Source[],
-  batchSize: number,
   apis: WorkflowApis,
   db: Dexie,
   sourceTable: SourceTable,
@@ -398,24 +413,25 @@ async function processSourceBatches(
   stockAlertThreshold: number,
 ): Promise<ProcessedSourceResult[]> {
   const processedResults: ProcessedSourceResult[] = [];
-  const batches = chunkSources(sources, batchSize);
 
-  for (const batch of batches) {
-    const batchResults = await Promise.all(
-      batch.map(async (source) => ({
+  for (const source of sources) {
+    const processedResult = {
+      source,
+      result: await processSource(
         source,
-        result: await processSource(
-          source,
-          apis,
-          db,
-          sourceTable,
-          productTable,
-          productAlertTable,
-          stockAlertThreshold,
-        ),
-      })),
-    );
-    processedResults.push(...batchResults);
+        apis,
+        db,
+        sourceTable,
+        productTable,
+        productAlertTable,
+        stockAlertThreshold,
+      ),
+    };
+    processedResults.push(processedResult);
+
+    if (processedResult.result.shouldStop) {
+      break;
+    }
   }
 
   return processedResults;
@@ -448,9 +464,8 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
   console.log("Params:", context.params);
   console.log('Executing product monitor workflow...');
 
-  const firstPassResults = await processSourceBatches(
+  const firstPassResults = await processSourcesSequentially(
     sources,
-    settings.monitorMaxConcurrency,
     apis,
     db,
     sourceTable,
@@ -459,19 +474,19 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
     settings.stockAlertThreshold,
   );
   const failedSources = firstPassResults
-    .filter(({ result }) => result.failedUrls > 0)
+    .filter(({ result }) => result.failedUrls > 0 && !result.shouldStop)
     .map(({ source }) => source);
+  const stoppedByWorkflow = firstPassResults.some(({ result }) => result.shouldStop);
 
   for (const { result } of firstPassResults) {
-    if (result.succeededUrls > 0) {
+    if (result.succeededUrls > 0 || result.shouldStop) {
       applyProcessResult(summary, result);
     }
   }
 
-  if (failedSources.length > 0) {
-    const retryResults = await processSourceBatches(
+  if (!stoppedByWorkflow && failedSources.length > 0) {
+    const retryResults = await processSourcesSequentially(
       failedSources,
-      settings.monitorMaxConcurrency,
       apis,
       db,
       sourceTable,
@@ -485,11 +500,9 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
     }
   }
 
-  const firstPassBatchCount = chunkSources(sources, settings.monitorMaxConcurrency).length;
-  const retryBatchCount = chunkSources(failedSources, settings.monitorMaxConcurrency).length;
   const result: WorkflowResult & { data: WorkflowSummary } = {
     success: summary.failedUrls === 0,
-    message: `Workflow completed in ${firstPassBatchCount} batches of up to ${settings.monitorMaxConcurrency}; retried ${failedSources.length} failed URLs in ${retryBatchCount} retry batches: ${summary.succeededUrls}/${summary.totalUrls} URLs succeeded, ${summary.failedUrls} URLs failed, ${summary.skippedInvalidUrls} invalid URLs skipped, ${summary.updatedProducts} products updated, ${summary.zeroedProducts} products marked out of stock, ${summary.alertRecordsCreated} alert records created.`,
+    message: `Workflow completed sequentially${stoppedByWorkflow ? ' and stopped because captcha verification was required' : ''}; retried ${stoppedByWorkflow ? 0 : failedSources.length} failed URLs once after the first pass: ${summary.succeededUrls}/${summary.totalUrls} URLs succeeded, ${summary.failedUrls} URLs failed, ${summary.skippedInvalidUrls} invalid URLs skipped, ${summary.updatedProducts} products updated, ${summary.zeroedProducts} products marked out of stock, ${summary.alertRecordsCreated} alert records created.`,
     data: summary,
   };
 

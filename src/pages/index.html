@@ -215,27 +215,12 @@
         <div class="settings-modal-header">
           <div>
             <div class="modal-title" id="settingsModalTitle">设置</div>
-            <div class="settings-modal-subtitle">配置监控任务并发数和库存预警阈值</div>
+            <div class="settings-modal-subtitle">配置库存预警阈值</div>
           </div>
         </div>
         <form class="settings-form" id="settingsForm">
           <div class="settings-section">
             <div class="settings-section-title">监控参数</div>
-            <div class="settings-row">
-              <label class="settings-label" for="monitorMaxConcurrencyInput">监控最大并发数</label>
-              <div class="settings-control">
-                <input
-                  class="settings-input settings-count-input"
-                  id="monitorMaxConcurrencyInput"
-                  name="monitorMaxConcurrency"
-                  type="number"
-                  min="1"
-                  max="50"
-                  step="1"
-                  required
-                />
-              </div>
-            </div>
             <div class="settings-row">
               <label class="settings-label" for="stockAlertThresholdInput">库存预警值</label>
               <div class="settings-control">
@@ -321,7 +306,6 @@
             <h2>设置</h2>
             <ul>
               <li>点击「设置」可配置监控参数。</li>
-              <li>「监控最大并发数」控制每批最多同时处理的有效 URL 数量，允许范围为 1-50，默认值为 1。</li>
               <li>「库存预警值」用于判断低库存，必须大于等于 1，默认值为 100。库存小于该值时会生成低库存报警。</li>
             </ul>
           </section>
@@ -329,7 +313,7 @@
           <section class="manual-section">
             <h2>后台工作流</h2>
             <ul>
-              <li>工作流会批量检查所有有效 URL，单个 URL 失败不会阻断其他 URL。</li>
+              <li>工作流会逐个检查所有有效 URL，单个 URL 失败不会阻断其他 URL。</li>
               <li>处理成功时会更新商品价格、库存和 URL 最近检查时间；处理失败时会记录错误并在 URL 状态中显示异常。</li>
               <li>如果历史商品本次没有被提取到，且历史库存不为 0，系统会将其视为商品缺失并记录报警。</li>
             </ul>
