@@ -222,6 +222,21 @@
           <div class="settings-section">
             <div class="settings-section-title">监控参数</div>
             <div class="settings-row">
+              <label class="settings-label" for="monitorHourlyRateInput">每小时监控速率</label>
+              <div class="settings-control">
+                <input
+                  class="settings-input settings-count-input"
+                  id="monitorHourlyRateInput"
+                  name="monitorHourlyRate"
+                  type="number"
+                  min="1"
+                  max="360"
+                  step="1"
+                  required
+                />
+              </div>
+            </div>
+            <div class="settings-row">
               <label class="settings-label" for="stockAlertThresholdInput">库存预警值</label>
               <div class="settings-control">
                 <input
@@ -306,6 +321,7 @@
             <h2>设置</h2>
             <ul>
               <li>点击「设置」可配置监控参数。</li>
+              <li>「每小时监控速率」控制工作流每小时最多请求多少个有效 URL，允许范围为 1-360，默认值为 60。</li>
               <li>「库存预警值」用于判断低库存，必须大于等于 1，默认值为 100。库存小于该值时会生成低库存报警。</li>
             </ul>
           </section>
@@ -313,7 +329,7 @@
           <section class="manual-section">
             <h2>后台工作流</h2>
             <ul>
-              <li>工作流会逐个检查所有有效 URL，单个 URL 失败不会阻断其他 URL。</li>
+              <li>工作流会逐个检查所有有效 URL，并按设置的每小时监控速率控制请求间隔；单个 URL 失败不会阻断其他 URL。</li>
               <li>处理成功时会更新商品价格、库存和 URL 最近检查时间；处理失败时会记录错误并在 URL 状态中显示异常。</li>
               <li>如果历史商品本次没有被提取到，且历史库存不为 0，系统会将其视为商品缺失并记录报警。</li>
             </ul>

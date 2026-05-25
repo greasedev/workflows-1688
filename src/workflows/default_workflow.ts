@@ -52,6 +52,7 @@ const NAME_KEYS = ['name', 'title', 'productName', 'skuName', '商品名称', '�
 const SPEC_KEYS = ['spec', 'specification', '规格', '商品规格'];
 const PRICE_KEYS = ['price', 'salePrice', 'offerPrice', 'amount', '价格', '售价'];
 const STOCK_KEYS = ['stock', 'inventory', 'quantity', '库存', '库存数', '数量'];
+const ONE_HOUR_MS = 60 * 60 * 1000;
 
 class WorkflowUserError extends Error {
   constructor(message: string) {
@@ -83,6 +84,10 @@ function parseJsonValue(value: string): unknown {
   } catch {
     throw new WorkflowUserError('商品提取结果不是有效的 JSON。');
   }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function normalizeExtractData(value: unknown): unknown {
@@ -411,10 +416,16 @@ async function processSourcesSequentially(
   productTable: ProductTable,
   productAlertTable: ProductAlertTable,
   stockAlertThreshold: number,
+  monitorHourlyRate: number,
 ): Promise<ProcessedSourceResult[]> {
   const processedResults: ProcessedSourceResult[] = [];
+  const requestIntervalMs = ONE_HOUR_MS / monitorHourlyRate;
 
-  for (const source of sources) {
+  for (const [index, source] of sources.entries()) {
+    if (index > 0) {
+      await delay(requestIntervalMs);
+    }
+
     const processedResult = {
       source,
       result: await processSource(
@@ -472,6 +483,7 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
     productTable,
     productAlertTable,
     settings.stockAlertThreshold,
+    settings.monitorHourlyRate,
   );
   const failedSources = firstPassResults
     .filter(({ result }) => result.failedUrls > 0 && !result.shouldStop)
@@ -493,6 +505,7 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
       productTable,
       productAlertTable,
       settings.stockAlertThreshold,
+      settings.monitorHourlyRate,
     );
 
     for (const { result } of retryResults) {

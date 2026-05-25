@@ -4,11 +4,16 @@ import type { AppSettings } from "../models/types";
 export const APP_SETTINGS_ID = "global" as const;
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   id: APP_SETTINGS_ID,
+  monitorHourlyRate: 60,
   stockAlertThreshold: 100,
   updatedAt: "",
 };
 
 export const SETTINGS_LIMITS = {
+  monitorHourlyRate: {
+    min: 1,
+    max: 360,
+  },
   stockAlertThreshold: {
     min: 1,
   },
@@ -28,6 +33,12 @@ function normalizeInteger(value: unknown, fallback: number, min: number, max?: n
 export function normalizeAppSettings(settings?: Partial<AppSettings> | null): AppSettings {
   return {
     id: APP_SETTINGS_ID,
+    monitorHourlyRate: normalizeInteger(
+      settings?.monitorHourlyRate,
+      DEFAULT_APP_SETTINGS.monitorHourlyRate,
+      SETTINGS_LIMITS.monitorHourlyRate.min,
+      SETTINGS_LIMITS.monitorHourlyRate.max,
+    ),
     stockAlertThreshold: normalizeInteger(
       settings?.stockAlertThreshold,
       DEFAULT_APP_SETTINGS.stockAlertThreshold,
@@ -50,7 +61,7 @@ export async function getAppSettings(settingsTable: AppSettingsTable): Promise<A
 
 export async function saveAppSettings(
   settingsTable: AppSettingsTable,
-  settings: Pick<AppSettings, "stockAlertThreshold">,
+  settings: Pick<AppSettings, "monitorHourlyRate" | "stockAlertThreshold">,
 ): Promise<AppSettings> {
   const normalizedSettings = normalizeAppSettings({
     ...settings,

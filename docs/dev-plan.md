@@ -24,7 +24,7 @@
   - `Product` 增加 `spec`、`updatedAt`。
   - 增加 `ProductAlertHitType`，可选值为 `missing`、`price_increase`、`low_stock`。
   - 增加 `ProductAlert`，字段包括 `url`、`name`、`spec`、`hitTypes`、`previousPrice`、`currentPrice`、`previousStock`、`currentStock`、`stockThreshold`、`checkedAt`。
-  - 增加 `AppSettings`，字段包括 `id`、`stockAlertThreshold`、`updatedAt`。
+  - 增加 `AppSettings`，字段包括 `id`、`monitorHourlyRate`、`stockAlertThreshold`、`updatedAt`。
   - 增加工作流结果摘要类型，例如成功 URL 数、失败 URL 数、更新商品数、库存置零商品数、命中记录数和错误摘要。
 - 更新 `src/libs/db.ts`：
   - 保留 `source` 表唯一 URL 约束。
@@ -35,7 +35,8 @@
   - 新增 `settings` 表，使用 `id = global` 保存唯一全局设置记录，索引为 `&id, updatedAt`。
   - 如 schema 版本需要变更，使用新的 Dexie 版本迁移，避免破坏已有数据；规格字段升级使用 `[name+spec+url]` 约束。
 - 新增共享设置 helper：
-  - 默认值为 `stockAlertThreshold = 100`。
+  - 默认值为 `monitorHourlyRate = 60`、`stockAlertThreshold = 100`。
+  - `monitorHourlyRate` 校验范围为 `1-360`。
   - `stockAlertThreshold` 必须为大于等于 `1` 的整数。
   - 页面和 workflow 均通过 helper 读取设置，首次缺失时写入默认设置。
 
@@ -109,9 +110,9 @@
 - 商品查询搜索栏只在 `商品查询` tab 下显示。
 - 在 `导入URL` 按钮旁提供 `生成测试报警` 按钮。
 - 在 `导入URL` 按钮右侧提供 `设置` 按钮。
-- 设置弹窗参考 `demo` 的设置界面结构和样式，包含 `库存预警值` 数字输入。
+- 设置弹窗参考 `demo` 的设置界面结构和样式，包含 `每小时监控速率` 和 `库存预警值` 两个数字输入。
 - 打开设置弹窗时读取 `settings` 表；保存时写入全局设置记录。
-- 设置保存校验：库存预警值为大于等于 `1` 的整数。
+- 设置保存校验：每小时监控速率为 `1-360`，库存预警值为大于等于 `1` 的整数。
 - 点击 `生成测试报警` 时读取 `Product` 表；如果没有商品，弹窗提示 `暂无商品数据，无法生成测试报警。`，不修改 `product_alert`。
 - 如果存在商品，先清空 `product_alert` 表，再按已有商品循环构造 20 条 `ProductAlert` 测试数据。
 - 测试数据的命中类型按固定模式循环：`missing`、`price_increase`、`low_stock`、`price_increase + low_stock`。
@@ -176,6 +177,7 @@ URL 监控列表交互：
   - 跳过 `isInvalid === true` 的失效 URL，不调用提取 API。
   - 读取 `settings` 表中的全局设置。
   - 对有效 URL 逐个调用 `apis.get_sku_list_from_url(url)`。
+  - 根据 `monitorHourlyRate` 计算请求间隔：第一个 URL 立即请求，第二个及后续 URL 请求前等待 `3600000 / monitorHourlyRate` 毫秒。
   - 单个 URL 失败时记录错误并继续下一个 URL。
   - 如果 `task.extract_data` 可解析为数组且第一个元素为 `captcha-required`，写入当前 URL 错误并立即停止工作流，不处理后续 URL，不执行失败重试。
 - 实现 API 结果解析：
@@ -262,15 +264,15 @@ URL 监控列表交互：
 - 输入 URL 查询对应商品。
 - 同时输入商品名称和 URL，确认使用组合过滤。
 - 商品查询列表价格列显示人民币标识 `¥`，库存列不显示币种。
-- 设置弹窗首次打开显示默认值：库存预警值 `100`。
+- 设置弹窗首次打开显示默认值：每小时监控速率 `60`，库存预警值 `100`。
 - 设置弹窗保存后刷新页面仍显示保存值。
-- 设置弹窗拒绝库存预警值 `<1` 的输入。
+- 设置弹窗拒绝每小时监控速率 `<1`、`>360` 或库存预警值 `<1` 的输入。
 - 修改库存预警值后生成测试报警，新报警的 `stockThreshold` 使用保存后的值，低库存样例小于该值。
 - 商品查询搜索栏左侧文案随筛选条件变化更新；清空筛选后显示 `已查询到0件商品。`。
 - 商品查询结果每页展示 20 条；筛选条件变化后回到第 1 页。
 - 工作流处理多个 URL，其中一个失败时整体继续执行。
 - 工作流遇到失效 URL 时跳过，并在摘要中统计跳过数量。
-- 工作流逐个处理所有有效 URL；首轮全部完成后，对本轮失败的 URL 再逐个重试一次。
+- 工作流逐个处理所有有效 URL，第一个 URL 立即请求，后续 URL 按每小时监控速率等待；首轮全部完成后，对本轮失败的 URL 再逐个重试一次。
 - 工作流遇到 `["captcha-required"]` 时，当前 URL 写入中文 `lastError`，立即停止，不处理后续 URL，不执行失败重试。
 - 工作流重新抓取后，缺失商品库存更新为 `0`。
 - 工作流重新抓取后，历史商品本次缺失且历史库存不为 `0` 时，`product_alert` 追加 `missing` 记录。

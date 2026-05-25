@@ -100,6 +100,9 @@ const settingsForm = getElement<HTMLFormElement>("settingsForm");
 const settingsCancelButton = getElement<HTMLButtonElement>(
   "settingsCancelButton",
 );
+const monitorHourlyRateInput = getElement<HTMLInputElement>(
+  "monitorHourlyRateInput",
+);
 const stockAlertThresholdInput = getElement<HTMLInputElement>(
   "stockAlertThresholdInput",
 );
@@ -311,6 +314,7 @@ function closeImportModal() {
 
 async function openSettingsModal() {
   const settings = await getAppSettings(settingsTable);
+  monitorHourlyRateInput.value = String(settings.monitorHourlyRate);
   stockAlertThresholdInput.value = String(settings.stockAlertThreshold);
   settingsError.hidden = true;
   settingsError.textContent = "";
@@ -364,11 +368,24 @@ function parseIntegerInput(input: HTMLInputElement, label: string): number {
   return value;
 }
 
-function parseSettingsForm(): Pick<AppSettings, "stockAlertThreshold"> {
+function parseSettingsForm(): Pick<AppSettings, "monitorHourlyRate" | "stockAlertThreshold"> {
+  const monitorHourlyRate = parseIntegerInput(
+    monitorHourlyRateInput,
+    "每小时监控速率",
+  );
   const stockAlertThreshold = parseIntegerInput(
     stockAlertThresholdInput,
     "库存预警值",
   );
+
+  if (
+    monitorHourlyRate < SETTINGS_LIMITS.monitorHourlyRate.min ||
+    monitorHourlyRate > SETTINGS_LIMITS.monitorHourlyRate.max
+  ) {
+    throw new Error(
+      `每小时监控速率必须在 ${SETTINGS_LIMITS.monitorHourlyRate.min}-${SETTINGS_LIMITS.monitorHourlyRate.max} 之间。`,
+    );
+  }
 
   if (stockAlertThreshold < SETTINGS_LIMITS.stockAlertThreshold.min) {
     throw new Error(
@@ -377,6 +394,7 @@ function parseSettingsForm(): Pick<AppSettings, "stockAlertThreshold"> {
   }
 
   return {
+    monitorHourlyRate,
     stockAlertThreshold,
   };
 }
