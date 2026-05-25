@@ -35,7 +35,7 @@
   - 新增 `settings` 表，使用 `id = global` 保存唯一全局设置记录，索引为 `&id, updatedAt`。
   - 如 schema 版本需要变更，使用新的 Dexie 版本迁移，避免破坏已有数据；规格字段升级使用 `[name+spec+url]` 约束。
 - 新增共享设置 helper：
-  - 默认值为 `monitorHourlyRate = 60`、`stockAlertThreshold = 100`。
+  - 默认值为 `monitorHourlyRate = 180`（每分钟 3 个）、`stockAlertThreshold = 100`。
   - `monitorHourlyRate` 校验范围为 `1-360`。
   - `stockAlertThreshold` 必须为大于等于 `1` 的整数。
   - 页面和 workflow 均通过 helper 读取设置，首次缺失时写入默认设置。
@@ -264,7 +264,7 @@ URL 监控列表交互：
 - 输入 URL 查询对应商品。
 - 同时输入商品名称和 URL，确认使用组合过滤。
 - 商品查询列表价格列显示人民币标识 `¥`，库存列不显示币种。
-- 设置弹窗首次打开显示默认值：每小时监控速率 `60`，库存预警值 `100`。
+- 设置弹窗首次打开显示默认值：每小时监控速率 `180`，库存预警值 `100`。
 - 设置弹窗保存后刷新页面仍显示保存值。
 - 设置弹窗拒绝每小时监控速率 `<1`、`>360` 或库存预警值 `<1` 的输入。
 - 修改库存预警值后生成测试报警，新报警的 `stockThreshold` 使用保存后的值，低库存样例小于该值。

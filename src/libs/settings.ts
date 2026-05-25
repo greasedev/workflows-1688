@@ -4,7 +4,7 @@ import type { AppSettings } from "../models/types";
 export const APP_SETTINGS_ID = "global" as const;
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   id: APP_SETTINGS_ID,
-  monitorHourlyRate: 60,
+  monitorHourlyRate: 180,
   stockAlertThreshold: 100,
   updatedAt: "",
 };
