@@ -422,10 +422,7 @@ async function processSourcesSequentially(
   const requestIntervalMs = ONE_HOUR_MS / monitorHourlyRate;
 
   for (const [index, source] of sources.entries()) {
-    if (index > 0) {
-      await delay(requestIntervalMs);
-    }
-
+    const requestStartedAt = Date.now();
     const processedResult = {
       source,
       result: await processSource(
@@ -442,6 +439,14 @@ async function processSourcesSequentially(
 
     if (processedResult.result.shouldStop) {
       break;
+    }
+
+    if (index < sources.length - 1) {
+      const elapsedMs = Date.now() - requestStartedAt;
+      const remainingIntervalMs = Math.max(0, requestIntervalMs - elapsedMs);
+      if (remainingIntervalMs > 0) {
+        await delay(remainingIntervalMs);
+      }
     }
   }
 
