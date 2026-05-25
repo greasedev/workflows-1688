@@ -848,13 +848,6 @@ function renderProducts(products: Product[]) {
   const urlQuery = urlFilter.value.trim().toLocaleLowerCase();
 
   productRows.textContent = "";
-  if (!nameQuery && !urlQuery) {
-    updateProductResultSummary(0);
-    productEmpty.classList.add("visible");
-    renderPagination(productPaginationControls, productPaginationState, 0);
-    return;
-  }
-
   const filtered = products
     .filter((product) => {
       const matchesName =
@@ -870,6 +863,7 @@ function renderProducts(products: Product[]) {
     });
 
   updateProductResultSummary(filtered.length);
+  productEmpty.textContent = products.length === 0 ? "暂无商品数据。" : "没有匹配商品。";
   productEmpty.classList.toggle("visible", filtered.length === 0);
   normalizePage(productPaginationState, filtered.length);
   renderPagination(productPaginationControls, productPaginationState, filtered.length);
