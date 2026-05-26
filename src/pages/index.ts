@@ -445,6 +445,10 @@ function formatOptionalNumber(value?: number): string {
   return typeof value === "number" ? formatNumber(value) : "-";
 }
 
+function formatProductStock(value: number): string {
+  return value === 0 ? "库存不足" : formatNumber(value);
+}
+
 function formatPrice(value?: number): string {
   return typeof value === "number" ? `¥${formatNumber(value)}` : "-";
 }
@@ -888,7 +892,7 @@ function renderProducts(products: Product[]) {
     priceCell.className = "price";
     priceCell.textContent = formatPrice(product.price);
     stockCell.className = "stock";
-    stockCell.textContent = formatNumber(product.stock);
+    stockCell.textContent = formatProductStock(product.stock);
 
     urlLink.className = "url-link";
     urlLink.href = product.url;
