@@ -541,7 +541,7 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
     return {
       success: false,
       message: error instanceof CaptchaRequiredError ? CAPTCHA_REQUIRED_MESSAGE : "Workflow failed",
-      error: summary,
+      error: error,
     };
   }
 
