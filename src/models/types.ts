@@ -42,7 +42,7 @@ export interface AppSettings {
   updatedAt: string; // 最近一次设置更新时间
 }
 
-export interface WorkflowSummary {
+export interface WorkflowSummary extends Record<string, unknown> {
   totalUrls: number;
   succeededUrls: number;
   failedUrls: number;
