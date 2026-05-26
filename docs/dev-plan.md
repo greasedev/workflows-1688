@@ -179,7 +179,7 @@ URL 监控列表交互：
   - 对有效 URL 逐个调用 `apis.get_sku_list_from_url(url)`。
   - 根据 `monitorHourlyRate` 计算请求间隔：第一个 URL 立即请求，每次请求完成后用 `3600000 / monitorHourlyRate` 减去本次请求耗时得到实际等待时间；请求耗时超过间隔时，下一个 URL 立即请求。
   - 单个 URL 失败时记录错误并继续下一个 URL。
-  - 如果 `task.extract_data` 可解析为数组且第一个元素为 `captcha-required`，写入当前 URL 错误并立即停止工作流，不处理后续 URL，不执行失败重试。
+  - 如果 `task.extract_data` 可解析为数组且第一个元素为 `captcha-required`，写入当前 URL 中文错误并立即停止工作流，不处理后续 URL，不执行失败重试，最终返回 `message: "captcha-required"`。
 - 实现 API 结果解析：
   - 优先读取 `task.extract_data`。
   - 识别 `["captcha-required"]` 和 JSON 字符串形式的 `"[\"captcha-required\"]"`。
@@ -273,7 +273,7 @@ URL 监控列表交互：
 - 工作流处理多个 URL，其中一个失败时整体继续执行。
 - 工作流遇到失效 URL 时跳过，并在摘要中统计跳过数量。
 - 工作流逐个处理所有有效 URL，第一个 URL 立即请求，后续 URL 按每小时监控速率控制相邻请求开始时间；首轮全部完成后，对本轮失败的 URL 再逐个重试一次。
-- 工作流遇到 `["captcha-required"]` 时，当前 URL 写入中文 `lastError`，立即停止，不处理后续 URL，不执行失败重试。
+- 工作流遇到 `["captcha-required"]` 时，当前 URL 写入中文 `lastError`，立即停止，不处理后续 URL，不执行失败重试，最终返回 `message: "captcha-required"`。
 - 工作流重新抓取后，缺失商品库存更新为 `0`。
 - 工作流重新抓取后，历史商品本次缺失且历史库存不为 `0` 时，`product_alert` 追加 `missing` 记录。
 - 工作流重新抓取后，历史商品已是 `stock = 0` 且本次仍缺失时，不重复追加 `missing` 记录。

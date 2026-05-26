@@ -109,7 +109,7 @@
 - URL 监控列表和商品查询列表每页展示 20 条记录；分页只影响页面展示，不影响监控 URL 总数、商品数统计或工作流处理。
 - API 单个 URL 调用失败时，需要记录失败信息并继续处理后续 URL。
 - 工作流按有效 URL 串行执行，并根据全局设置中的 `每小时监控速率` 控制相邻请求开始时间的最小间隔；请求运行耗时计入该间隔。首轮全部完成后，对本轮失败的 URL 再串行重试一次。
-- 如果 API 提取结果返回 `["captcha-required"]`，工作流需要写入当前 URL 的错误信息并立即停止，不继续处理后续 URL，也不执行失败 URL 重试。
+- 如果 API 提取结果返回 `["captcha-required"]`，工作流需要写入当前 URL 的中文错误信息并立即停止，不继续处理后续 URL，也不执行失败 URL 重试；最终返回值的 `message` 固定为 `captcha-required`。
 - 全局设置只保留一条 `id = global` 的记录；首次缺失时使用默认值初始化。
 
 ## 4. 数据模型
@@ -198,7 +198,7 @@
 工作流需要对接口返回值做必要解析和容错：
 
 - 优先从 `task.extract_data` 中读取提取结果。
-- 当 `task.extract_data` 可解析为数组且第一个元素为 `captcha-required` 时，视为验证码拦截并停止当前工作流。
+- 当 `task.extract_data` 可解析为数组且第一个元素为 `captcha-required` 时，视为验证码拦截并停止当前工作流，最终返回 `message: "captcha-required"`。
 - 结果应解析为商品数组。
 - 商品名称为空的记录应跳过。
 - 商品规格为空的记录应跳过。
@@ -256,7 +256,7 @@
 - 工作流能逐个调用 `get_sku_list_from_url(product_url)` 处理所有有效 URL，并按 `每小时监控速率` 控制相邻请求开始时间的最小间隔。
 - API 返回多个商品时，系统能分别写入或更新商品表。
 - 某个 URL 调用失败时，其他 URL 仍继续处理。
-- API 返回 `["captcha-required"]` 时，当前 URL 写入中文 `lastError`，工作流立即停止且不触发重试。
+- API 返回 `["captcha-required"]` 时，当前 URL 写入中文 `lastError`，工作流立即停止且不触发重试，最终返回 `message: "captcha-required"`。
 - 同一 URL 下历史商品本次未出现在 API 结果中时，该商品库存更新为 `0`。
 - 同一 URL 下历史商品本次未出现在 API 结果中，且历史库存不为 `0` 时，追加一条 `missing` 命中记录。
 - 数据库中历史商品价格低于本次获取价格时，追加一条 `price_increase` 命中记录。

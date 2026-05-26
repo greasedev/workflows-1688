@@ -39,9 +39,7 @@ type SettingsTable = Dexie.Table<AppSettings, string>;
 type SourceProcessResult = Pick<
   WorkflowSummary,
   'succeededUrls' | 'failedUrls' | 'updatedProducts' | 'zeroedProducts' | 'alertRecordsCreated' | 'errors'
-> & {
-  shouldStop?: boolean;
-};
+>;
 type ProcessedSourceResult = {
   source: Source;
   result: SourceProcessResult;
@@ -52,6 +50,7 @@ const NAME_KEYS = ['name', 'title', 'productName', 'skuName', '商品名称', '�
 const SPEC_KEYS = ['spec', 'specification', '规格', '商品规格'];
 const PRICE_KEYS = ['price', 'salePrice', 'offerPrice', 'amount', '价格', '售价'];
 const STOCK_KEYS = ['stock', 'inventory', 'quantity', '库存', '库存数', '数量'];
+const CAPTCHA_REQUIRED_MESSAGE = 'captcha-required';
 const ONE_HOUR_MS = 60 * 60 * 1000;
 
 class WorkflowUserError extends Error {
@@ -61,10 +60,13 @@ class WorkflowUserError extends Error {
   }
 }
 
-class WorkflowStopError extends WorkflowUserError {
+class CaptchaRequiredError extends WorkflowUserError {
+  processResult?: SourceProcessResult;
+  processedResults?: ProcessedSourceResult[];
+
   constructor(message: string) {
     super(message);
-    this.name = 'WorkflowStopError';
+    this.name = 'CaptchaRequiredError';
   }
 }
 
@@ -96,7 +98,7 @@ function normalizeExtractData(value: unknown): unknown {
 
 function isCaptchaRequiredExtractData(value: unknown): boolean {
   const extractData = normalizeExtractData(value);
-  return Array.isArray(extractData) && extractData[0] === 'captcha-required';
+  return Array.isArray(extractData) && extractData[0] === CAPTCHA_REQUIRED_MESSAGE;
 }
 
 function findProductArray(value: unknown): RawProduct[] {
@@ -268,7 +270,7 @@ function extractProducts(result: ExecutionResult, url: string, updatedAt: string
 
   const extractData = result.task.extract_data;
   if (isCaptchaRequiredExtractData(extractData)) {
-    throw new WorkflowStopError('商品提取触发验证码，请人工处理后重试。');
+    throw new CaptchaRequiredError('商品提取触发验证码，请人工处理后重试。');
   }
 
   const rawProducts = findProductArray(extractData);
@@ -386,7 +388,6 @@ async function processSource(
   } catch (error) {
     const message = errorMessage(error);
     resultSummary.failedUrls = 1;
-    resultSummary.shouldStop = error instanceof WorkflowStopError;
     resultSummary.errors.push({ url: source.url, message });
 
     try {
@@ -402,6 +403,11 @@ async function processSource(
         url: source.url,
         message: `记录 URL 错误状态失败：${errorMessage(statusError)}`,
       });
+    }
+
+    if (error instanceof CaptchaRequiredError) {
+      error.processResult = resultSummary;
+      throw error;
     }
   }
 
@@ -423,22 +429,33 @@ async function processSourcesSequentially(
 
   for (const [index, source] of sources.entries()) {
     const requestStartedAt = Date.now();
-    const processedResult = {
-      source,
-      result: await processSource(
+    try {
+      const processedResult = {
         source,
-        apis,
-        db,
-        sourceTable,
-        productTable,
-        productAlertTable,
-        stockAlertThreshold,
-      ),
-    };
-    processedResults.push(processedResult);
-
-    if (processedResult.result.shouldStop) {
-      break;
+        result: await processSource(
+          source,
+          apis,
+          db,
+          sourceTable,
+          productTable,
+          productAlertTable,
+          stockAlertThreshold,
+        ),
+      };
+      processedResults.push(processedResult);
+    } catch (error) {
+      if (error instanceof CaptchaRequiredError) {
+        processedResults.push({
+          source,
+          result: error.processResult ?? {
+            ...emptySourceProcessResult(),
+            failedUrls: 1,
+            errors: [{ url: source.url, message: error.message }],
+          },
+        });
+        error.processedResults = processedResults;
+      }
+      throw error;
     }
 
     if (index < sources.length - 1) {
@@ -480,30 +497,11 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
   console.log("Params:", context.params);
   console.log('Executing product monitor workflow...');
 
-  const firstPassResults = await processSourcesSequentially(
-    sources,
-    apis,
-    db,
-    sourceTable,
-    productTable,
-    productAlertTable,
-    settings.stockAlertThreshold,
-    settings.monitorHourlyRate,
-  );
-  const failedSources = firstPassResults
-    .filter(({ result }) => result.failedUrls > 0 && !result.shouldStop)
-    .map(({ source }) => source);
-  const stoppedByWorkflow = firstPassResults.some(({ result }) => result.shouldStop);
+  let retriedFailedSourceCount = 0;
 
-  for (const { result } of firstPassResults) {
-    if (result.succeededUrls > 0 || result.shouldStop) {
-      applyProcessResult(summary, result);
-    }
-  }
-
-  if (!stoppedByWorkflow && failedSources.length > 0) {
-    const retryResults = await processSourcesSequentially(
-      failedSources,
+  try {
+    const firstPassResults = await processSourcesSequentially(
+      sources,
       apis,
       db,
       sourceTable,
@@ -512,15 +510,44 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
       settings.stockAlertThreshold,
       settings.monitorHourlyRate,
     );
+    const failedSources = firstPassResults
+      .filter(({ result }) => result.failedUrls > 0)
+      .map(({ source }) => source);
 
-    for (const { result } of retryResults) {
-      applyProcessResult(summary, result);
+    for (const { result } of firstPassResults) {
+      if (result.succeededUrls > 0) {
+        applyProcessResult(summary, result);
+      }
     }
+
+    if (failedSources.length > 0) {
+      retriedFailedSourceCount = failedSources.length;
+      const retryResults = await processSourcesSequentially(
+        failedSources,
+        apis,
+        db,
+        sourceTable,
+        productTable,
+        productAlertTable,
+        settings.stockAlertThreshold,
+        settings.monitorHourlyRate,
+      );
+
+      for (const { result } of retryResults) {
+        applyProcessResult(summary, result);
+      }
+    }
+  } catch (error) {
+    return {
+      success: false,
+      message: error instanceof CaptchaRequiredError ? CAPTCHA_REQUIRED_MESSAGE : "Workflow failed",
+      error: summary,
+    };
   }
 
   const result: WorkflowResult & { data: WorkflowSummary } = {
     success: summary.failedUrls === 0,
-    message: `Workflow completed sequentially${stoppedByWorkflow ? ' and stopped because captcha verification was required' : ''}; retried ${stoppedByWorkflow ? 0 : failedSources.length} failed URLs once after the first pass: ${summary.succeededUrls}/${summary.totalUrls} URLs succeeded, ${summary.failedUrls} URLs failed, ${summary.skippedInvalidUrls} invalid URLs skipped, ${summary.updatedProducts} products updated, ${summary.zeroedProducts} products marked out of stock, ${summary.alertRecordsCreated} alert records created.`,
+    message: `Workflow completed sequentially; retried ${retriedFailedSourceCount} failed URLs once after the first pass: ${summary.succeededUrls}/${summary.totalUrls} URLs succeeded, ${summary.failedUrls} URLs failed, ${summary.skippedInvalidUrls} invalid URLs skipped, ${summary.updatedProducts} products updated, ${summary.zeroedProducts} products marked out of stock, ${summary.alertRecordsCreated} alert records created.`,
     data: summary,
   };
 
