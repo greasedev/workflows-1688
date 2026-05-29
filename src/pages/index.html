@@ -56,6 +56,9 @@
             <input id="excelInput" type="file" accept=".xlsx,.xls,.csv" />
             <span>导入URL</span>
           </label>
+          <button class="btn btn-secondary" id="exportErrorUrlButton" type="button">
+            导出异常URL
+          </button>
           <button class="btn btn-secondary settings-entry-btn" id="settingsButton" type="button">
             设置
           </button>
@@ -137,7 +140,6 @@
                   <select id="sourceStatusFilter" aria-label="筛选 URL 状态">
                     <option value="all" selected>全部</option>
                     <option value="normal">正常</option>
-                    <option value="invalid">失效</option>
                     <option value="error">异常</option>
                   </select>
                 </label>
@@ -309,8 +311,9 @@
             <ul>
               <li>「URL监控」展示已导入 URL、已提取商品数、最近检查时间、状态和操作；顶部数字表示 URL 总数。</li>
               <li>点击 URL 打开原始页面；点击商品数会切换到「商品查询」并按该 URL 筛选商品。</li>
-              <li>状态分为「正常」「失效」「异常」。表头「状态」可按状态筛选，也可选择「全部」清除筛选。</li>
+              <li>表头「状态」可筛选「全部」「正常」「异常」；历史失效 URL 会在「全部」中显示为「失效」。</li>
               <li>处理失败的 URL 会在状态列显示错误信息；后续成功处理后错误状态会被清除。</li>
+              <li>点击「导出异常URL」可导出全部异常 URL，Excel 包含 URL 和数字 ID 两列。</li>
               <li>点击「删除」前系统会二次确认；确认后该 URL 会从列表移除，并同步删除该 URL 关联商品，历史报警保留。</li>
             </ul>
           </section>

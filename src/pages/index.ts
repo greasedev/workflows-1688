@@ -24,7 +24,8 @@ type ImportPreview = {
 };
 
 type ActivePanel = "alert" | "source" | "product";
-type SourceStatusFilter = "all" | "normal" | "invalid" | "error";
+type SourceStatus = "normal" | "invalid" | "error";
+type SourceStatusFilter = "all" | Exclude<SourceStatus, "invalid">;
 type AlertHitTypeFilter = "all" | ProductAlertHitType;
 type PaginationState = {
   currentPage: number;
@@ -38,6 +39,7 @@ type PaginationControls = {
   nextButton: HTMLButtonElement;
 };
 type PageState = {
+  version: number;
   activePanel: ActivePanel;
   alertPage: number;
   sourcePage: number;
@@ -50,12 +52,12 @@ type PageState = {
 
 const SOURCE_URL_COLUMN = "上游1";
 const PAGE_STATE_STORAGE_KEY = "product-monitor-page-state";
+const PAGE_STATE_VERSION = 3;
 const PAGE_SIZE = 20;
 const ACTIVE_PANEL_VALUES: ActivePanel[] = ["alert", "source", "product"];
 const SOURCE_STATUS_FILTER_VALUES: SourceStatusFilter[] = [
   "all",
   "normal",
-  "invalid",
   "error",
 ];
 const ALERT_HIT_TYPE_FILTER_VALUES: AlertHitTypeFilter[] = [
@@ -96,6 +98,9 @@ const userManualCloseButton = getElement<HTMLButtonElement>(
   "userManualCloseButton",
 );
 const excelInput = getElement<HTMLInputElement>("excelInput");
+const exportErrorUrlButton = getElement<HTMLButtonElement>(
+  "exportErrorUrlButton",
+);
 const settingsButton = getElement<HTMLButtonElement>("settingsButton");
 const importModal = getElement<HTMLDivElement>("importModal");
 const importModalTitle = getElement<HTMLDivElement>("importModalTitle");
@@ -240,6 +245,7 @@ function parseSavedPage(value: unknown): number {
 
 function defaultPageState(): PageState {
   return {
+    version: PAGE_STATE_VERSION,
     activePanel: "alert",
     alertPage: 1,
     sourcePage: 1,
@@ -259,8 +265,10 @@ function readPageState(): PageState {
 
     const parsedState: unknown = JSON.parse(rawState);
     if (!isRecord(parsedState)) return defaults;
+    if (parsedState.version !== PAGE_STATE_VERSION) return defaults;
 
     return {
+      version: PAGE_STATE_VERSION,
       activePanel: isActivePanel(parsedState.activePanel)
         ? parsedState.activePanel
         : defaults.activePanel,
@@ -285,6 +293,7 @@ function readPageState(): PageState {
 
 function savePageState() {
   const state: PageState = {
+    version: PAGE_STATE_VERSION,
     activePanel,
     alertPage: alertPaginationState.currentPage,
     sourcePage: sourcePaginationState.currentPage,
@@ -527,6 +536,19 @@ function formatDate(value?: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function formatExportTimestamp(date = new Date()): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+    "-",
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds()),
+  ].join("");
 }
 
 function formatNumber(value: number): string {
@@ -790,6 +812,57 @@ async function importExcel(file: File): Promise<ImportStats> {
   return commitImportExcel(preview);
 }
 
+function extractNumericIdFromUrl(url: string): string {
+  const htmlIndex = url.indexOf(".html");
+  if (htmlIndex === -1) return "";
+
+  const slashIndex = url.lastIndexOf("/", htmlIndex);
+  if (slashIndex === -1) return "";
+
+  const id = url.slice(slashIndex + 1, htmlIndex);
+  return /^\d+$/.test(id) ? id : "";
+}
+
+function downloadWorkbook(workbook: XLSX.WorkBook, filename: string) {
+  const workbookData = XLSX.write(workbook, {
+    bookType: "xlsx",
+    type: "array",
+  });
+  const blob = new Blob([workbookData], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = objectUrl;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(objectUrl);
+}
+
+async function exportErrorUrls() {
+  const sources = await sourceTable.toArray();
+  const errorSources = sources.filter((source) => Boolean(source.lastError));
+
+  if (errorSources.length === 0) {
+    showImportModal("导出提示", "暂无异常 URL 可导出。", "success");
+    return;
+  }
+
+  const rows = errorSources.map((source) => ({
+    URL: source.url,
+    ID: extractNumericIdFromUrl(source.url),
+  }));
+  const worksheet = XLSX.utils.json_to_sheet(rows, {
+    header: ["URL", "ID"],
+  });
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "异常URL");
+  downloadWorkbook(workbook, `异常URL-${formatExportTimestamp()}.xlsx`);
+}
+
 async function loadDashboardData() {
   const [sources, products, alerts] = await Promise.all([
     sourceTable.orderBy("url").toArray(),
@@ -892,7 +965,7 @@ function renderAlerts(alerts: ProductAlert[]) {
   }
 }
 
-function sourceStatus(source: Source): Exclude<SourceStatusFilter, "all"> {
+function sourceStatus(source: Source): SourceStatus {
   if (source.isInvalid === true) return "invalid";
   if (source.lastError) return "error";
   return "normal";
@@ -1098,6 +1171,21 @@ excelInput.addEventListener("change", async () => {
     );
   } finally {
     excelInput.value = "";
+  }
+});
+
+exportErrorUrlButton.addEventListener("click", async () => {
+  exportErrorUrlButton.disabled = true;
+  try {
+    await exportErrorUrls();
+  } catch (error) {
+    showImportModal(
+      "导出失败",
+      error instanceof Error ? error.message : "导出异常 URL 失败。",
+      "error",
+    );
+  } finally {
+    exportErrorUrlButton.disabled = false;
   }
 });
 
