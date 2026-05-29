@@ -201,6 +201,15 @@ input {
   background: #e4e7eb;
 }
 
+.btn-danger {
+  background: var(--danger);
+  color: white;
+}
+
+.btn-danger:hover {
+  background: #c0392b;
+}
+
 .settings-entry-btn,
 .settings-entry-btn:hover {
   color: white;

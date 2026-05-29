@@ -377,6 +377,36 @@ function confirmImportRemoval(stats: ImportStats): Promise<boolean> {
   });
 }
 
+function confirmDeleteSource(source: Source, productTotal: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    showImportModal(
+      "确认删除 URL",
+      [
+        "删除后将移除此 URL，并删除该 URL 关联的商品。",
+        "历史监控报警会保留。",
+        "",
+        `URL：${source.url}`,
+        `关联商品：${productTotal} 个`,
+        "",
+        "确认删除吗？",
+      ].join("\n"),
+      "error",
+      {
+        confirmText: "删除",
+        cancelText: "取消",
+        onConfirm: () => {
+          closeImportModal();
+          resolve(true);
+        },
+        onCancel: () => {
+          closeImportModal();
+          resolve(false);
+        },
+      },
+    );
+  });
+}
+
 async function openSettingsModal() {
   const settings = await getAppSettings(settingsTable);
   monitorHourlyRateInput.value = String(settings.monitorHourlyRate);
@@ -947,13 +977,11 @@ function renderSources(sources: Source[], countsByUrl: Map<string, number>) {
         : "status-ok";
     statusCell.textContent = isInvalid ? "失效" : source.lastError || "正常";
 
-    actionButton.className = isInvalid
-      ? "btn btn-primary source-action-btn"
-      : "btn btn-secondary source-action-btn";
+    actionButton.className = "btn btn-danger source-action-btn";
     actionButton.type = "button";
-    actionButton.textContent = isInvalid ? "恢复有效" : "标记失效";
+    actionButton.textContent = "删除";
     actionButton.addEventListener("click", () => {
-      toggleSourceInvalid(source, !isInvalid);
+      deleteSource(source);
     });
     actionCell.append(actionButton);
 
@@ -962,14 +990,16 @@ function renderSources(sources: Source[], countsByUrl: Map<string, number>) {
   }
 }
 
-async function toggleSourceInvalid(source: Source, isInvalid: boolean) {
+async function deleteSource(source: Source) {
   if (source.id === undefined) return;
 
-  const now = new Date().toISOString();
-  await sourceTable.update(source.id, {
-    isInvalid,
-    invalidAt: isInvalid ? now : undefined,
-    updatedAt: now,
+  const productTotal = await productTable.where("url").equals(source.url).count();
+  const confirmed = await confirmDeleteSource(source, productTotal);
+  if (!confirmed) return;
+
+  await db.transaction("rw", sourceTable, productTable, async () => {
+    await sourceTable.delete(source.id as number);
+    await productTable.where("url").equals(source.url).delete();
   });
   await loadDashboardData();
 }
