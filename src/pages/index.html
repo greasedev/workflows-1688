@@ -205,6 +205,9 @@
         <div class="modal-title" id="importModalTitle">导入提示</div>
         <div class="modal-body" id="importModalBody">-</div>
         <div class="modal-actions">
+          <button class="btn btn-secondary" id="importModalCancelButton" type="button" hidden>
+            取消
+          </button>
           <button class="btn btn-primary" id="importModalCloseButton" type="button">确认</button>
         </div>
       </div>
@@ -282,9 +285,10 @@
               <li>点击「导入URL」，上传 Excel、XLS 或 CSV 文件；系统读取第一个工作表。</li>
               <li>文件必须包含固定表头「上游1」，系统只读取该列中的 URL。</li>
               <li>仅支持 http 或 https 的 1688.com 及其子域名 URL；其他域名会计入「非1688 URL」。</li>
-              <li>导入采用合并去重模式：数据库已有 URL 和本次文件内重复 URL 都不会重复写入。</li>
+              <li>导入采用完整清单同步模式：本次 Excel 中不存在的已导入 URL 会被删除，并同步删除该 URL 关联的商品。</li>
+              <li>如果导入会删除 URL，系统会先弹窗展示将删除的 URL 数和商品数，确认后才会写入数据库。</li>
               <li>重新导入已存在 URL 不会改变其失效状态；失效 URL 需要在「URL监控」中手动恢复。</li>
-              <li>导入完成后会显示新增 URL、重复 URL、无效或空值、非1688 URL 的数量；缺少「上游1」表头会直接提示导入失败。</li>
+              <li>导入完成后会显示新增 URL、重复 URL、无效或空值、非1688 URL、删除 URL 和删除商品的数量；缺少「上游1」表头会直接提示导入失败。</li>
             </ul>
           </section>
 

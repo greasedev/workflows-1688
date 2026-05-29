@@ -13,6 +13,14 @@ type ImportStats = {
   duplicate: number;
   invalid: number;
   non1688: number;
+  removedSources: number;
+  removedProducts: number;
+};
+type ImportPreview = {
+  stats: ImportStats;
+  newSources: Source[];
+  removedSourceIds: number[];
+  removedUrls: string[];
 };
 
 type ActivePanel = "alert" | "source" | "product";
@@ -94,6 +102,9 @@ const importModalTitle = getElement<HTMLDivElement>("importModalTitle");
 const importModalBody = getElement<HTMLDivElement>("importModalBody");
 const importModalCloseButton = getElement<HTMLButtonElement>(
   "importModalCloseButton",
+);
+const importModalCancelButton = getElement<HTMLButtonElement>(
+  "importModalCancelButton",
 );
 const settingsModal = getElement<HTMLDivElement>("settingsModal");
 const settingsForm = getElement<HTMLFormElement>("settingsForm");
@@ -188,6 +199,15 @@ const productPaginationControls: PaginationControls = {
   prevButton: productPrevPageButton,
   nextButton: productNextPageButton,
 };
+let importModalConfirmHandler: (() => void | Promise<void>) | null = null;
+let importModalCancelHandler: (() => void | Promise<void>) | null = null;
+
+class ImportCancelledError extends Error {
+  constructor() {
+    super("已取消导入。");
+    this.name = "ImportCancelledError";
+  }
+}
 
 function getElement<T extends HTMLElement>(id: string): T {
   const element = document.getElementById(id);
@@ -301,15 +321,60 @@ function showImportModal(
   title: string,
   message: string,
   kind: "success" | "error" | "" = "",
+  options: {
+    confirmText?: string;
+    cancelText?: string;
+    onConfirm?: () => void | Promise<void>;
+    onCancel?: () => void | Promise<void>;
+  } = {},
 ) {
   importModalTitle.textContent = title;
   importModalTitle.className = kind ? `modal-title ${kind}` : "modal-title";
   importModalBody.textContent = message;
+  importModalCloseButton.textContent = options.confirmText ?? "确认";
+  importModalCancelButton.textContent = options.cancelText ?? "取消";
+  importModalCancelButton.hidden = !options.onCancel;
+  importModalConfirmHandler = options.onConfirm ?? null;
+  importModalCancelHandler = options.onCancel ?? null;
   importModal.classList.add("active");
 }
 
 function closeImportModal() {
   importModal.classList.remove("active");
+  importModalCloseButton.textContent = "确认";
+  importModalCancelButton.textContent = "取消";
+  importModalCancelButton.hidden = true;
+  importModalConfirmHandler = null;
+  importModalCancelHandler = null;
+}
+
+function confirmImportRemoval(stats: ImportStats): Promise<boolean> {
+  return new Promise((resolve) => {
+    showImportModal(
+      "确认导入并删除",
+      [
+        "本次导入会以 Excel 中的有效 1688 URL 作为完整监控清单。",
+        "Excel 中不存在的 URL 将被删除，并删除这些 URL 关联的商品。",
+        "",
+        formatImportStats(stats),
+        "",
+        "确认继续导入吗？",
+      ].join("\n"),
+      "error",
+      {
+        confirmText: "确认导入",
+        cancelText: "取消",
+        onConfirm: () => {
+          closeImportModal();
+          resolve(true);
+        },
+        onCancel: () => {
+          closeImportModal();
+          resolve(false);
+        },
+      },
+    );
+  });
 }
 
 async function openSettingsModal() {
@@ -558,17 +623,42 @@ function updateProductResultSummary(count: number) {
   productResultSummary.textContent = `已查询到${count}件商品。`;
 }
 
-function hasSourceUrlHeader(sheet: XLSX.WorkSheet): boolean {
-  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+function readSheetRows(sheet: XLSX.WorkSheet): unknown[][] {
+  return XLSX.utils.sheet_to_json<unknown[]>(sheet, {
     header: 1,
     defval: "",
     blankrows: false,
   });
-  const header = rows[0] ?? [];
-  return header.some((cell) => String(cell).trim() === SOURCE_URL_COLUMN);
 }
 
-async function importExcel(file: File): Promise<ImportStats> {
+function findSourceUrlColumnIndex(rows: unknown[][]): number {
+  const header = rows[0] ?? [];
+  return header.findIndex((cell) => String(cell).trim() === SOURCE_URL_COLUMN);
+}
+
+function createEmptyImportStats(): ImportStats {
+  return {
+    added: 0,
+    duplicate: 0,
+    invalid: 0,
+    non1688: 0,
+    removedSources: 0,
+    removedProducts: 0,
+  };
+}
+
+function formatImportStats(stats: ImportStats): string {
+  return [
+    `新增 URL：${stats.added} 个`,
+    `重复 URL：${stats.duplicate} 个`,
+    `无效或空值：${stats.invalid} 个`,
+    `非1688 URL：${stats.non1688} 个`,
+    `删除 URL：${stats.removedSources} 个`,
+    `删除商品：${stats.removedProducts} 个`,
+  ].join("\n");
+}
+
+async function previewImportExcel(file: File): Promise<ImportPreview> {
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: "array" });
   const sheetName = workbook.SheetNames[0];
@@ -577,23 +667,21 @@ async function importExcel(file: File): Promise<ImportStats> {
   }
 
   const sheet = workbook.Sheets[sheetName];
-  if (!hasSourceUrlHeader(sheet)) {
+  const rows = readSheetRows(sheet);
+  const sourceUrlColumnIndex = findSourceUrlColumnIndex(rows);
+  if (sourceUrlColumnIndex === -1) {
     throw new Error(`Excel 文件必须包含固定表头 ${SOURCE_URL_COLUMN}。`);
   }
 
-  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
-    defval: "",
-    blankrows: false,
-  });
   const existingSources = await sourceTable.toArray();
   const existingUrls = new Set(existingSources.map((source) => source.url));
-  const seenUrls = new Set<string>();
+  const desiredUrls = new Set<string>();
   const now = new Date().toISOString();
   const newSources: Source[] = [];
-  const stats: ImportStats = { added: 0, duplicate: 0, invalid: 0, non1688: 0 };
+  const stats = createEmptyImportStats();
 
-  for (const row of rows) {
-    const { url, isValidUrl } = normalizeImportUrl(row[SOURCE_URL_COLUMN]);
+  for (const row of rows.slice(1)) {
+    const { url, isValidUrl } = normalizeImportUrl(row[sourceUrlColumnIndex]);
     if (!url) {
       if (isValidUrl) {
         stats.non1688 += 1;
@@ -603,12 +691,17 @@ async function importExcel(file: File): Promise<ImportStats> {
       continue;
     }
 
-    if (existingUrls.has(url) || seenUrls.has(url)) {
+    if (desiredUrls.has(url)) {
       stats.duplicate += 1;
       continue;
     }
 
-    seenUrls.add(url);
+    desiredUrls.add(url);
+    if (existingUrls.has(url)) {
+      stats.duplicate += 1;
+      continue;
+    }
+
     stats.added += 1;
     newSources.push({
       url,
@@ -617,11 +710,54 @@ async function importExcel(file: File): Promise<ImportStats> {
     });
   }
 
-  if (newSources.length > 0) {
-    await sourceTable.bulkAdd(newSources);
+  const removedUrls = existingSources
+    .filter((source) => !desiredUrls.has(source.url))
+    .map((source) => source.url);
+  const removedSourceIds = existingSources
+    .filter((source) => !desiredUrls.has(source.url) && source.id !== undefined)
+    .map((source) => source.id as number);
+  const removedProducts =
+    removedUrls.length > 0
+      ? await productTable.where("url").anyOf(removedUrls).count()
+      : 0;
+
+  stats.removedSources = removedUrls.length;
+  stats.removedProducts = removedProducts;
+
+  return {
+    stats,
+    newSources,
+    removedSourceIds,
+    removedUrls,
+  };
+}
+
+async function commitImportExcel(preview: ImportPreview): Promise<ImportStats> {
+  await db.transaction("rw", sourceTable, productTable, async () => {
+    if (preview.newSources.length > 0) {
+      await sourceTable.bulkAdd(preview.newSources);
+    }
+    if (preview.removedSourceIds.length > 0) {
+      await sourceTable.bulkDelete(preview.removedSourceIds);
+    }
+    if (preview.removedUrls.length > 0) {
+      await productTable.where("url").anyOf(preview.removedUrls).delete();
+    }
+  });
+
+  return preview.stats;
+}
+
+async function importExcel(file: File): Promise<ImportStats> {
+  const preview = await previewImportExcel(file);
+  if (preview.stats.removedSources > 0) {
+    const confirmed = await confirmImportRemoval(preview.stats);
+    if (!confirmed) {
+      throw new ImportCancelledError();
+    }
   }
 
-  return stats;
+  return commitImportExcel(preview);
 }
 
 async function loadDashboardData() {
@@ -917,11 +1053,14 @@ excelInput.addEventListener("change", async () => {
     const stats = await importExcel(file);
     showImportModal(
       "导入完成",
-      `新增 URL：${stats.added} 个\n重复 URL：${stats.duplicate} 个\n无效或空值：${stats.invalid} 个\n非1688 URL：${stats.non1688} 个`,
+      formatImportStats(stats),
       "success",
     );
     await loadDashboardData();
   } catch (error) {
+    if (error instanceof ImportCancelledError) {
+      return;
+    }
     showImportModal(
       "导入失败",
       error instanceof Error ? error.message : "导入失败。",
@@ -932,12 +1071,31 @@ excelInput.addEventListener("change", async () => {
   }
 });
 
-importModalCloseButton.addEventListener("click", () => {
+importModalCloseButton.addEventListener("click", async () => {
+  const handler = importModalConfirmHandler;
+  if (handler) {
+    await handler();
+    return;
+  }
+  closeImportModal();
+});
+
+importModalCancelButton.addEventListener("click", async () => {
+  const handler = importModalCancelHandler;
+  if (handler) {
+    await handler();
+    return;
+  }
   closeImportModal();
 });
 
 importModal.addEventListener("click", (event) => {
   if (event.target === importModal) {
+    const handler = importModalCancelHandler;
+    if (handler) {
+      void handler();
+      return;
+    }
     closeImportModal();
   }
 });
