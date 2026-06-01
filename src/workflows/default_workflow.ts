@@ -52,6 +52,7 @@ const PRICE_KEYS = ['price', 'salePrice', 'offerPrice', 'amount', '价格', '售
 const STOCK_KEYS = ['stock', 'inventory', 'quantity', '库存', '库存数', '数量'];
 const CAPTCHA_REQUIRED_MESSAGE = 'captcha-required';
 const ONE_HOUR_MS = 60 * 60 * 1000;
+const UNKNOWN_STOCK = -1;
 
 class WorkflowUserError extends Error {
   constructor(message: string) {
@@ -159,9 +160,9 @@ function normalizeProducts(rawProducts: RawProduct[], url: string, updatedAt: st
     const name = readFirstString(rawProduct, NAME_KEYS);
     const spec = readFirstString(rawProduct, SPEC_KEYS) || '-';
     const price = readFirstNumber(rawProduct, PRICE_KEYS);
-    const stock = readFirstNumber(rawProduct, STOCK_KEYS);
+    const stock = readFirstNumber(rawProduct, STOCK_KEYS) ?? UNKNOWN_STOCK;
 
-    if (!name || !spec || price === null || stock === null) {
+    if (!name || !spec || price === null) {
       continue;
     }
 
@@ -224,9 +225,10 @@ function buildProductAlerts(
     if (existingProduct && existingProduct.price < currentProduct.price) {
       hitTypes.push('price_increase');
     }
-    const isCurrentLowStock = currentProduct.stock < stockAlertThreshold;
+    const isCurrentLowStock =
+      currentProduct.stock >= 0 && currentProduct.stock < stockAlertThreshold;
     const wasExistingLowStock = existingProduct
-      ? existingProduct.stock < stockAlertThreshold
+      ? existingProduct.stock >= 0 && existingProduct.stock < stockAlertThreshold
       : false;
     if (isCurrentLowStock && !wasExistingLowStock) {
       hitTypes.push('low_stock');

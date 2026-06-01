@@ -559,10 +559,12 @@ function formatNumber(value: number): string {
 }
 
 function formatOptionalNumber(value?: number): string {
+  if (value === -1) return "-";
   return typeof value === "number" ? formatNumber(value) : "-";
 }
 
 function formatProductStock(value: number): string {
+  if (value === -1) return "-";
   return value === 0 ? "库存不足" : formatNumber(value);
 }
 
