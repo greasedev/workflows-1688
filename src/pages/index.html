@@ -59,6 +59,9 @@
           <button class="btn btn-secondary" id="exportErrorUrlButton" type="button">
             导出异常URL
           </button>
+          <button class="btn btn-secondary" id="exportAlertButton" type="button">
+            导出监控报警
+          </button>
           <button class="btn btn-secondary settings-entry-btn" id="settingsButton" type="button">
             设置
           </button>
@@ -301,7 +304,8 @@
               <li>报警列表按检查时间倒序排列，时间相同时按记录序号倒序排列。</li>
               <li>表头「命中类型」可筛选全部报警、商品缺失、价格上涨或低库存。</li>
               <li>命中类型包括「商品缺失」「价格上涨」「低库存」。同一商品命中多个类型时会在同一单元格内分行展示。</li>
-              <li>价格变化带「¥」标识，库存变化不带币种；缺失值显示为「-」。</li>
+              <li>导出时变化信息合并在命中类型列中；价格变化带「¥」标识，库存变化不带币种，缺失值显示为「-」。</li>
+              <li>点击「导出监控报警」可导出全部报警；导出后可确认清空本次已导出的报警数据。</li>
               <li>点击来源 URL 可在新页面打开原始商品页面；没有报警或筛选后无结果时会显示空状态。</li>
             </ul>
           </section>

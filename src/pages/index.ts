@@ -101,6 +101,7 @@ const excelInput = getElement<HTMLInputElement>("excelInput");
 const exportErrorUrlButton = getElement<HTMLButtonElement>(
   "exportErrorUrlButton",
 );
+const exportAlertButton = getElement<HTMLButtonElement>("exportAlertButton");
 const settingsButton = getElement<HTMLButtonElement>("settingsButton");
 const importModal = getElement<HTMLDivElement>("importModal");
 const importModalTitle = getElement<HTMLDivElement>("importModalTitle");
@@ -402,6 +403,28 @@ function confirmDeleteSource(source: Source, productTotal: number): Promise<bool
       "error",
       {
         confirmText: "删除",
+        cancelText: "取消",
+        onConfirm: () => {
+          closeImportModal();
+          resolve(true);
+        },
+        onCancel: () => {
+          closeImportModal();
+          resolve(false);
+        },
+      },
+    );
+  });
+}
+
+function confirmClearExportedAlerts(alertCount: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    showImportModal(
+      "确认清空监控报警",
+      `已导出 ${alertCount} 条监控报警，是否清空本次已导出的报警数据？`,
+      "error",
+      {
+        confirmText: "清空",
         cancelText: "取消",
         onConfirm: () => {
           closeImportModal();
@@ -865,6 +888,66 @@ async function exportErrorUrls() {
   downloadWorkbook(workbook, `异常URL-${formatExportTimestamp()}.xlsx`);
 }
 
+function sortAlertsByCheckedAt(alerts: ProductAlert[]): ProductAlert[] {
+  return [...alerts].sort((a, b) => {
+    const timeDiff = new Date(b.checkedAt).getTime() - new Date(a.checkedAt).getTime();
+    return timeDiff || (b.id ?? 0) - (a.id ?? 0);
+  });
+}
+
+function formatAlertHitTypeLine(alert: ProductAlert, hitType: ProductAlertHitType): string {
+  const label = ALERT_HIT_TYPE_LABELS[hitType] ?? hitType;
+  const detail = alertHitTypeDetail(alert, hitType);
+  return detail ? `${label} ${detail}` : label;
+}
+
+function formatAlertHitTypeLines(alert: ProductAlert): string {
+  return alert.hitTypes
+    .map((hitType) => formatAlertHitTypeLine(alert, hitType))
+    .join("\n");
+}
+
+async function exportAlerts() {
+  const alerts = sortAlertsByCheckedAt(await productAlertTable.toArray());
+  if (alerts.length === 0) {
+    showImportModal("导出提示", "暂无监控报警可导出。", "success");
+    return;
+  }
+
+  const exportedAlertIds = alerts
+    .map((alert) => alert.id)
+    .filter((id): id is number => id !== undefined);
+  const rows = alerts.map((alert) => ({
+    ID: extractNumericIdFromUrl(alert.url),
+    商品名称: alert.name,
+    规格: alert.spec,
+    命中类型: formatAlertHitTypeLines(alert),
+    来源URL: alert.url,
+    检查时间: formatDate(alert.checkedAt),
+  }));
+  const worksheet = XLSX.utils.json_to_sheet(rows, {
+    header: [
+      "ID",
+      "商品名称",
+      "规格",
+      "命中类型",
+      "来源URL",
+      "检查时间",
+    ],
+  });
+  const workbook = XLSX.utils.book_new();
+
+  XLSX.utils.book_append_sheet(workbook, worksheet, "监控报警");
+  downloadWorkbook(workbook, `监控报警-${formatExportTimestamp()}.xlsx`);
+
+  const shouldClear = await confirmClearExportedAlerts(alerts.length);
+  if (!shouldClear || exportedAlertIds.length === 0) return;
+
+  await productAlertTable.bulkDelete(exportedAlertIds);
+  await loadDashboardData();
+  showImportModal("清空完成", "本次已导出的监控报警数据已清空。", "success");
+}
+
 async function loadDashboardData() {
   const [sources, products, alerts] = await Promise.all([
     sourceTable.orderBy("url").toArray(),
@@ -894,10 +977,7 @@ function renderAlerts(alerts: ProductAlert[]) {
   alertCount.textContent = String(alerts.length);
   alertRows.textContent = "";
 
-  const sortedAlerts = [...alerts].sort((a, b) => {
-    const timeDiff = new Date(b.checkedAt).getTime() - new Date(a.checkedAt).getTime();
-    return timeDiff || (b.id ?? 0) - (a.id ?? 0);
-  });
+  const sortedAlerts = sortAlertsByCheckedAt(alerts);
   const hitTypeFilter = alertHitTypeFilterValue;
   const filteredAlerts =
     hitTypeFilter === "all"
@@ -1188,6 +1268,21 @@ exportErrorUrlButton.addEventListener("click", async () => {
     );
   } finally {
     exportErrorUrlButton.disabled = false;
+  }
+});
+
+exportAlertButton.addEventListener("click", async () => {
+  exportAlertButton.disabled = true;
+  try {
+    await exportAlerts();
+  } catch (error) {
+    showImportModal(
+      "导出失败",
+      error instanceof Error ? error.message : "导出监控报警失败。",
+      "error",
+    );
+  } finally {
+    exportAlertButton.disabled = false;
   }
 });
 
