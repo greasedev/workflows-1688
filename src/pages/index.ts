@@ -73,7 +73,7 @@ let activePanel: ActivePanel = "alert";
 let alertHitTypeFilterValue: AlertHitTypeFilter = "all";
 let sourceStatusFilterValue: SourceStatusFilter = "all";
 const ALERT_HIT_TYPE_LABELS: Record<ProductAlertHitType, string> = {
-  missing: "商品缺失",
+  missing: "商品下架",
   price_increase: "价格上涨",
   low_stock: "低库存",
 };
