@@ -293,6 +293,7 @@ function buildProductAlerts(
   currentProducts: Product[],
   checkedAt: string,
   stockAlertThreshold: number,
+  enabledAlertTypes: Set<ProductAlertHitType>,
   explicitlyOfflineProductKeys = new Set<string>(),
 ): ProductAlert[] {
   const alerts: ProductAlert[] = [];
@@ -302,7 +303,10 @@ function buildProductAlerts(
   for (const currentProduct of currentProducts) {
     const existingProduct = existingByKey.get(productKey(currentProduct));
     if (explicitlyOfflineProductKeys.has(productKey(currentProduct))) {
-      if (!existingProduct || existingProduct.stock !== 0) {
+      if (
+        enabledAlertTypes.has('missing') &&
+        (!existingProduct || existingProduct.stock !== 0)
+      ) {
         alerts.push(createProductAlert(currentProduct, ['missing'], checkedAt, stockAlertThreshold, {
           previousPrice: existingProduct?.price,
           previousStock: existingProduct?.stock,
@@ -313,7 +317,11 @@ function buildProductAlerts(
 
     const hitTypes: ProductAlertHitType[] = [];
 
-    if (existingProduct && existingProduct.price < currentProduct.price) {
+    if (
+      enabledAlertTypes.has('price_increase') &&
+      existingProduct &&
+      existingProduct.price < currentProduct.price
+    ) {
       hitTypes.push('price_increase');
     }
     const isCurrentLowStock =
@@ -321,7 +329,7 @@ function buildProductAlerts(
     const wasExistingLowStock = existingProduct
       ? existingProduct.stock >= 0 && existingProduct.stock < stockAlertThreshold
       : false;
-    if (isCurrentLowStock && !wasExistingLowStock) {
+    if (enabledAlertTypes.has('low_stock') && isCurrentLowStock && !wasExistingLowStock) {
       hitTypes.push('low_stock');
     }
     if (hitTypes.length === 0) {
@@ -337,7 +345,11 @@ function buildProductAlerts(
   }
 
   for (const existingProduct of existingProducts) {
-    if (currentByKey.has(productKey(existingProduct)) || existingProduct.stock === 0) {
+    if (
+      !enabledAlertTypes.has('missing') ||
+      currentByKey.has(productKey(existingProduct)) ||
+      existingProduct.stock === 0
+    ) {
       continue;
     }
 
@@ -454,6 +466,7 @@ async function persistSourceProducts(
   productTable: ProductTable,
   productAlertTable: ProductAlertTable,
   stockAlertThreshold: number,
+  enabledAlertTypes: ProductAlertHitType[],
 ): Promise<SourceProcessResult> {
   const resultSummary = emptySourceProcessResult();
   const { products, explicitlyOfflineProductKeys } = normalizedProducts;
@@ -472,6 +485,7 @@ async function persistSourceProducts(
       products,
       checkedAt,
       stockAlertThreshold,
+      new Set(enabledAlertTypes),
       explicitlyOfflineProductKeys,
     );
 
@@ -535,6 +549,7 @@ async function processSource(
   productTable: ProductTable,
   productAlertTable: ProductAlertTable,
   stockAlertThreshold: number,
+  enabledAlertTypes: ProductAlertHitType[],
 ): Promise<SourceProcessResult> {
   const checkedAt = new Date().toISOString();
 
@@ -550,6 +565,7 @@ async function processSource(
       productTable,
       productAlertTable,
       stockAlertThreshold,
+      enabledAlertTypes,
     );
   } catch (error) {
     const resultSummary = await recordSourceFailure(source, sourceTable, checkedAt, error);
@@ -569,6 +585,7 @@ async function processJinritemaiSources(
   productTable: ProductTable,
   productAlertTable: ProductAlertTable,
   stockAlertThreshold: number,
+  enabledAlertTypes: ProductAlertHitType[],
 ): Promise<ProcessedSourceResult[]> {
   if (sources.length === 0) {
     return [];
@@ -643,6 +660,7 @@ async function processJinritemaiSources(
           productTable,
           productAlertTable,
           stockAlertThreshold,
+          enabledAlertTypes,
         ),
       });
     } catch (error) {
@@ -664,6 +682,7 @@ async function processSourcesSequentially(
   productTable: ProductTable,
   productAlertTable: ProductAlertTable,
   stockAlertThreshold: number,
+  enabledAlertTypes: ProductAlertHitType[],
   monitorHourlyRate: number,
 ): Promise<ProcessedSourceResult[]> {
   const processedResults: ProcessedSourceResult[] = [];
@@ -682,6 +701,7 @@ async function processSourcesSequentially(
           productTable,
           productAlertTable,
           stockAlertThreshold,
+          enabledAlertTypes,
         ),
       };
       processedResults.push(processedResult);
@@ -752,6 +772,7 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
       productTable,
       productAlertTable,
       settings.stockAlertThreshold,
+      settings.enabledAlertTypes,
     );
     const firstSequentialPassResults = await processSourcesSequentially(
       sequentialSources,
@@ -761,6 +782,7 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
       productTable,
       productAlertTable,
       settings.stockAlertThreshold,
+      settings.enabledAlertTypes,
       settings.monitorHourlyRate,
     );
 
@@ -787,6 +809,7 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
         productTable,
         productAlertTable,
         settings.stockAlertThreshold,
+        settings.enabledAlertTypes,
       );
 
       for (const { result } of retryResults) {
@@ -804,6 +827,7 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
         productTable,
         productAlertTable,
         settings.stockAlertThreshold,
+        settings.enabledAlertTypes,
         settings.monitorHourlyRate,
       );
 

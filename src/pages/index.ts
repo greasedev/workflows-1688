@@ -123,6 +123,15 @@ const monitorHourlyRateInput = getElement<HTMLInputElement>(
 const stockAlertThresholdInput = getElement<HTMLInputElement>(
   "stockAlertThresholdInput",
 );
+const missingAlertEnabledInput = getElement<HTMLInputElement>(
+  "missingAlertEnabledInput",
+);
+const priceIncreaseAlertEnabledInput = getElement<HTMLInputElement>(
+  "priceIncreaseAlertEnabledInput",
+);
+const lowStockAlertEnabledInput = getElement<HTMLInputElement>(
+  "lowStockAlertEnabledInput",
+);
 const settingsError = getElement<HTMLDivElement>("settingsError");
 const alertTab = getElement<HTMLButtonElement>("alertTab");
 const sourceTab = getElement<HTMLButtonElement>("sourceTab");
@@ -443,6 +452,10 @@ async function openSettingsModal() {
   const settings = await getAppSettings(settingsTable);
   monitorHourlyRateInput.value = String(settings.monitorHourlyRate);
   stockAlertThresholdInput.value = String(settings.stockAlertThreshold);
+  missingAlertEnabledInput.checked = settings.enabledAlertTypes.includes("missing");
+  priceIncreaseAlertEnabledInput.checked =
+    settings.enabledAlertTypes.includes("price_increase");
+  lowStockAlertEnabledInput.checked = settings.enabledAlertTypes.includes("low_stock");
   settingsError.hidden = true;
   settingsError.textContent = "";
   settingsModal.classList.add("active");
@@ -495,7 +508,10 @@ function parseIntegerInput(input: HTMLInputElement, label: string): number {
   return value;
 }
 
-function parseSettingsForm(): Pick<AppSettings, "monitorHourlyRate" | "stockAlertThreshold"> {
+function parseSettingsForm(): Pick<
+  AppSettings,
+  "monitorHourlyRate" | "stockAlertThreshold" | "enabledAlertTypes"
+> {
   const monitorHourlyRate = parseIntegerInput(
     monitorHourlyRateInput,
     "每小时监控速率",
@@ -520,9 +536,18 @@ function parseSettingsForm(): Pick<AppSettings, "monitorHourlyRate" | "stockAler
     );
   }
 
+  const enabledAlertTypes: ProductAlertHitType[] = [];
+  if (missingAlertEnabledInput.checked) enabledAlertTypes.push("missing");
+  if (priceIncreaseAlertEnabledInput.checked) enabledAlertTypes.push("price_increase");
+  if (lowStockAlertEnabledInput.checked) enabledAlertTypes.push("low_stock");
+  if (enabledAlertTypes.length === 0) {
+    throw new Error("请至少激活一种报警类型。");
+  }
+
   return {
     monitorHourlyRate,
     stockAlertThreshold,
+    enabledAlertTypes,
   };
 }
 

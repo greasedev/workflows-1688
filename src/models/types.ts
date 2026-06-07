@@ -39,6 +39,7 @@ export interface AppSettings {
   id: 'global'; // 全局设置记录固定主键
   monitorHourlyRate: number; // 每小时监控请求数
   stockAlertThreshold: number; // 库存预警阈值
+  enabledAlertTypes: ProductAlertHitType[]; // 已激活的报警类型
   updatedAt: string; // 最近一次设置更新时间
 }
 

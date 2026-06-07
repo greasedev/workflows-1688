@@ -24,7 +24,7 @@
   - `Product` 增加 `spec`、`updatedAt`。
   - 增加 `ProductAlertHitType`，可选值为 `missing`、`price_increase`、`low_stock`。
   - 增加 `ProductAlert`，字段包括 `url`、`name`、`spec`、`hitTypes`、`previousPrice`、`currentPrice`、`previousStock`、`currentStock`、`stockThreshold`、`checkedAt`。
-  - 增加 `AppSettings`，字段包括 `id`、`monitorHourlyRate`、`stockAlertThreshold`、`updatedAt`。
+  - 增加 `AppSettings`，字段包括 `id`、`monitorHourlyRate`、`stockAlertThreshold`、`enabledAlertTypes`、`updatedAt`。
   - 增加工作流结果摘要类型，例如成功 URL 数、失败 URL 数、更新商品数、库存置零商品数、命中记录数和错误摘要。
 - 更新 `src/libs/db.ts`：
   - 保留 `source` 表唯一 URL 约束。
@@ -35,9 +35,10 @@
   - 新增 `settings` 表，使用 `id = global` 保存唯一全局设置记录，索引为 `&id, updatedAt`。
   - 如 schema 版本需要变更，使用新的 Dexie 版本迁移，避免破坏已有数据；规格字段升级使用 `[name+spec+url]` 约束。
 - 新增共享设置 helper：
-  - 默认值为 `monitorHourlyRate = 180`（每分钟 3 个）、`stockAlertThreshold = 100`。
+  - 默认值为 `monitorHourlyRate = 180`（每分钟 3 个）、`stockAlertThreshold = 100`，三类报警默认全部激活。
   - `monitorHourlyRate` 校验范围为 `1-360`。
   - `stockAlertThreshold` 必须为大于等于 `1` 的整数。
+  - `enabledAlertTypes` 至少包含一个有效报警类型；旧设置缺失该字段时自动补齐全部报警类型。
   - 页面和 workflow 均通过 helper 读取设置，首次缺失时写入默认设置。
 
 验收点：
@@ -109,9 +110,9 @@
 - 商品查询搜索栏只在 `商品查询` tab 下显示。
 - 在 `导入URL` 按钮旁提供 `生成测试报警` 按钮。
 - 在 `导入URL` 按钮右侧提供 `设置` 按钮。
-- 设置弹窗参考 `demo` 的设置界面结构和样式，包含 `每小时监控速率` 和 `库存预警值` 两个数字输入。
+- 设置弹窗参考 `demo` 的设置界面结构和样式，包含 `每小时监控速率`、`库存预警值` 和三类报警激活复选框。
 - 打开设置弹窗时读取 `settings` 表；保存时写入全局设置记录。
-- 设置保存校验：每小时监控速率为 `1-360`，库存预警值为大于等于 `1` 的整数。
+- 设置保存校验：每小时监控速率为 `1-360`，库存预警值为大于等于 `1` 的整数，并至少激活一种报警类型。
 - 点击 `生成测试报警` 时读取 `Product` 表；如果没有商品，弹窗提示 `暂无商品数据，无法生成测试报警。`，不修改 `product_alert`。
 - 如果存在商品，先清空 `product_alert` 表，再按已有商品循环构造 20 条 `ProductAlert` 测试数据。
 - 测试数据的命中类型按固定模式循环：`missing`、`price_increase`、`low_stock`、`price_increase + low_stock`。
@@ -208,6 +209,7 @@ URL 监控列表交互：
   - 本次商品库存小于 `stockAlertThreshold`，且无历史商品或历史库存不小于该阈值时，追加 `low_stock` 命中记录；库存等于阈值不命中。
   - 本次 API 返回的新品如果库存小于 `stockAlertThreshold`，也需要追加 `low_stock` 命中记录。
   - 同一商品同一轮命中多种情况时，只写入一条 `ProductAlert`，`hitTypes` 保存全部命中类型。
+  - 命中类型按 `enabledAlertTypes` 过滤；过滤后为空时不写报警，但商品和来源状态仍正常更新。
   - jinritemai 显式下架商品只生成 `missing`；首次发现即下架也生成报警，历史库存已为 `0` 时不重复生成。
   - 商品命中记录采用追加模式，不覆盖历史记录。
   - 商品命中记录只保留 `checkedAt` 一个时间字段。
@@ -275,6 +277,7 @@ URL 监控列表交互：
 - 设置弹窗首次打开显示默认值：每小时监控速率 `180`，库存预警值 `100`。
 - 设置弹窗保存后刷新页面仍显示保存值。
 - 设置弹窗拒绝每小时监控速率 `<1`、`>360` 或库存预警值 `<1` 的输入。
+- 设置弹窗首次打开时三类报警全部激活，保存后刷新仍保持选择；全部取消时拒绝保存。
 - 修改库存预警值后生成测试报警，新报警的 `stockThreshold` 使用保存后的值，低库存样例小于该值。
 - 商品查询搜索栏左侧文案随筛选条件变化更新；清空筛选后显示 `已查询到0件商品。`。
 - 商品查询结果每页展示 20 条；筛选条件变化后回到第 1 页。
@@ -290,6 +293,7 @@ URL 监控列表交互：
 - 工作流发现历史商品价格低于本次价格时，`product_alert` 追加 `price_increase` 记录。
 - 工作流发现本次商品库存小于数据库中的 `stockAlertThreshold`，且无历史商品或历史库存不小于该阈值时，`product_alert` 追加 `low_stock` 记录；库存等于阈值时不追加。
 - 同一商品同时价格上涨且低库存时，`product_alert` 只新增一条记录，`hitTypes` 同时包含 `price_increase` 和 `low_stock`。
+- 禁用某类报警后，工作流仍更新对应商品状态但不新增该类型报警；已有历史报警继续展示。
 - 重复运行工作流且持续满足价格上涨等命中条件时，`product_alert` 按轮次追加新记录，不覆盖旧记录；持续低库存状态不重复追加 `low_stock` 记录。
 
 ## 3. 文件级改动清单
