@@ -50,7 +50,6 @@ type PageState = {
   productUrl: string;
 };
 
-const SOURCE_URL_COLUMN = "上游1";
 const PAGE_STATE_STORAGE_KEY = "product-monitor-page-state";
 const PAGE_STATE_VERSION = 3;
 const PAGE_SIZE = 20;
@@ -708,11 +707,6 @@ function readSheetRows(sheet: XLSX.WorkSheet): unknown[][] {
   });
 }
 
-function findSourceUrlColumnIndex(rows: unknown[][]): number {
-  const header = rows[0] ?? [];
-  return header.findIndex((cell) => String(cell).trim() === SOURCE_URL_COLUMN);
-}
-
 function createEmptyImportStats(): ImportStats {
   return {
     added: 0,
@@ -745,10 +739,6 @@ async function previewImportExcel(file: File): Promise<ImportPreview> {
 
   const sheet = workbook.Sheets[sheetName];
   const rows = readSheetRows(sheet);
-  const sourceUrlColumnIndex = findSourceUrlColumnIndex(rows);
-  if (sourceUrlColumnIndex === -1) {
-    throw new Error(`Excel 文件必须包含固定表头 ${SOURCE_URL_COLUMN}。`);
-  }
 
   const existingSources = await sourceTable.toArray();
   const existingUrls = new Set(existingSources.map((source) => source.url));
@@ -757,34 +747,34 @@ async function previewImportExcel(file: File): Promise<ImportPreview> {
   const newSources: Source[] = [];
   const stats = createEmptyImportStats();
 
-  for (const row of rows.slice(1)) {
-    const { url, isValidUrl } = normalizeImportUrl(row[sourceUrlColumnIndex]);
-    if (!url) {
-      if (isValidUrl) {
-        stats.non1688 += 1;
-      } else {
-        stats.invalid += 1;
+  for (const row of rows) {
+    for (const cell of row) {
+      const { url, isValidUrl } = normalizeImportUrl(cell);
+      if (!url) {
+        if (isValidUrl) {
+          stats.non1688 += 1;
+        }
+        continue;
       }
-      continue;
-    }
 
-    if (desiredUrls.has(url)) {
-      stats.duplicate += 1;
-      continue;
-    }
+      if (desiredUrls.has(url)) {
+        stats.duplicate += 1;
+        continue;
+      }
 
-    desiredUrls.add(url);
-    if (existingUrls.has(url)) {
-      stats.duplicate += 1;
-      continue;
-    }
+      desiredUrls.add(url);
+      if (existingUrls.has(url)) {
+        stats.duplicate += 1;
+        continue;
+      }
 
-    stats.added += 1;
-    newSources.push({
-      url,
-      createdAt: now,
-      updatedAt: now,
-    });
+      stats.added += 1;
+      newSources.push({
+        url,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
   }
 
   const removedUrls = existingSources
