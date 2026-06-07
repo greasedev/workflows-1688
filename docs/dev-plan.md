@@ -176,10 +176,14 @@ URL 监控列表交互：
   - 读取 `source` 表中的所有 URL。
   - 跳过 `isInvalid === true` 的失效 URL，不调用提取 API。
   - 读取 `settings` 表中的全局设置。
-  - 对有效 URL 逐个调用 `apis.get_sku_list_from_url(url)`。
+  - 按域名拆分有效 URL；先将全部 jinritemai URL 通过 `JSON.stringify` 转为数组字符串并调用一次批量接口，再逐个处理其他 URL。
+  - jinritemai 批量结果按商品 `url` 字段匹配来源；非请求 URL 的返回商品忽略。
+  - jinritemai 批量调用不参与 `monitorHourlyRate` 限速。
   - 根据 `monitorHourlyRate` 计算请求间隔：第一个 URL 立即请求，每次请求完成后用 `3600000 / monitorHourlyRate` 减去本次请求耗时得到实际等待时间；请求耗时超过间隔时，下一个 URL 立即请求。
   - 单个 URL 失败时记录错误并继续下一个 URL。
   - 如果 `task.extract_data` 可解析为数组且第一个元素为 `captcha-required`，写入当前 URL 中文错误并立即停止工作流，不处理后续 URL，不执行失败重试，最终返回 `message: "captcha-required"`。
+  - jinritemai 批量调用失败时整批 URL 失败；首轮结束后仅将失败 URL 重新组成 JSON 数组批量重试一次。
+  - jinritemai 批量返回缺少某个请求 URL 的可处理商品时，该 URL 失败且不修改历史商品。
 - 实现 API 结果解析：
   - 优先读取 `task.extract_data`。
   - 识别 `["captcha-required"]` 和 JSON 字符串形式的 `"[\"captcha-required\"]"`。
@@ -187,6 +191,8 @@ URL 监控列表交互：
   - 优先从数组本身或 `products`、`skus`、`data` 字段中识别商品数组。
   - 跳过商品名称或规格为空的记录。
   - 将价格和库存转换为数字。
+  - jinritemai 商品 `live_add_enum` 包含 `下架` 时视为显式下架，强制库存为 `0`。
+  - jinritemai 显式下架商品允许缺少价格；已有商品保留历史价格，首次出现使用 `0`。
 - 实现商品写入：
   - 同一 URL 下按 `[name+spec+url]` upsert。
   - 更新 `price`、`stock`、`updatedAt`。
@@ -202,6 +208,7 @@ URL 监控列表交互：
   - 本次商品库存小于 `stockAlertThreshold`，且无历史商品或历史库存不小于该阈值时，追加 `low_stock` 命中记录；库存等于阈值不命中。
   - 本次 API 返回的新品如果库存小于 `stockAlertThreshold`，也需要追加 `low_stock` 命中记录。
   - 同一商品同一轮命中多种情况时，只写入一条 `ProductAlert`，`hitTypes` 保存全部命中类型。
+  - jinritemai 显式下架商品只生成 `missing`；首次发现即下架也生成报警，历史库存已为 `0` 时不重复生成。
   - 商品命中记录采用追加模式，不覆盖历史记录。
   - 商品命中记录只保留 `checkedAt` 一个时间字段。
   - 新增命中记录、商品 upsert、缺失商品库存置零和成功状态更新应在同一 URL 的处理流程中完成；任一步失败时，该 URL 按失败处理并记录 `lastError`。
@@ -221,12 +228,13 @@ URL 监控列表交互：
 验收点：
 
 - 工作流能遍历所有 `source` URL。
-- 工作流逐个处理所有有效 URL。
+- 工作流批量处理 jinritemai URL，并逐个处理其他有效 URL。
 - API 返回多个商品时能分别写入或更新。
 - 某个 URL 失败不阻断后续 URL。
 - 本次未返回的历史商品库存变为 `0`。
 - 商品下架、价格上涨和低库存会追加写入 `product_alert`。
 - 同一商品同一轮命中多种情况时，只新增一条命中记录。
+- jinritemai 显式下架商品库存置 `0` 且只新增 `missing` 命中记录。
 - 工作流返回清晰摘要。
 
 ### 2.5 构建与验证
@@ -272,7 +280,9 @@ URL 监控列表交互：
 - 商品查询结果每页展示 20 条；筛选条件变化后回到第 1 页。
 - 工作流处理多个 URL，其中一个失败时整体继续执行。
 - 工作流遇到失效 URL 时跳过，并在摘要中统计跳过数量。
-- 工作流逐个处理所有有效 URL，第一个 URL 立即请求，后续 URL 按每小时监控速率控制相邻请求开始时间；首轮全部完成后，对本轮失败的 URL 再逐个重试一次。
+- 工作流先批量处理全部 jinritemai URL，再逐个处理其他有效 URL；jinritemai 批量调用不参与限速，首轮结束后仅批量重试失败的 jinritemai URL，其他失败 URL 再逐个重试一次。
+- jinritemai 批量结果按商品 `url` 字段写入对应来源；未返回可处理商品的请求 URL 失败且历史商品保持不变。
+- jinritemai 商品 `live_add_enum` 包含 `下架` 时库存更新为 `0`，首次下架生成 `missing`，重复下架不重复报警。
 - 工作流遇到 `["captcha-required"]` 时，当前 URL 写入中文 `lastError`，立即停止，不处理后续 URL，不执行失败重试，最终返回 `message: "captcha-required"`。
 - 工作流重新抓取后，缺失商品库存更新为 `0`，商品查询列表展示为 `库存不足`。
 - 工作流重新抓取后，历史商品本次缺失且历史库存不为 `0` 时，`product_alert` 追加 `missing` 记录。

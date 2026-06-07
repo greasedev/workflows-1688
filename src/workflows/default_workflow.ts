@@ -44,12 +44,19 @@ type ProcessedSourceResult = {
   source: Source;
   result: SourceProcessResult;
 };
+type NormalizedProducts = {
+  products: Product[];
+  explicitlyOfflineProductKeys: Set<string>;
+};
 
 const ARRAY_KEYS = ['products', 'skus', 'data', 'items', 'list', 'result'];
 const NAME_KEYS = ['name', 'title'];
 const SPEC_KEYS = ['spec'];
 const PRICE_KEYS = ['price'];
 const STOCK_KEYS = ['stock', 'stock_num_sum'];
+const JINRITEMAI_URL_KEYS = ['url'];
+const JINRITEMAI_OFFLINE_KEY = 'live_add_enum';
+const JINRITEMAI_DOMAIN = 'jinritemai.com';
 const CAPTCHA_REQUIRED_MESSAGE = 'captcha-required';
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const UNKNOWN_STOCK = -1;
@@ -153,6 +160,30 @@ function readFirstNumber(record: RawProduct, keys: string[]): number | null {
   return null;
 }
 
+function isJinritemaiUrl(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return hostname === JINRITEMAI_DOMAIN || hostname.endsWith(`.${JINRITEMAI_DOMAIN}`);
+  } catch {
+    return false;
+  }
+}
+
+function normalizeUrlForMatch(value: unknown): string | null {
+  const url = String(value ?? '').trim();
+  if (!url) return null;
+
+  try {
+    return new URL(url).href;
+  } catch {
+    return null;
+  }
+}
+
+function isJinritemaiProductOffline(rawProduct: RawProduct): boolean {
+  return String(rawProduct[JINRITEMAI_OFFLINE_KEY] ?? '').includes('下架');
+}
+
 function normalizeProducts(rawProducts: RawProduct[], url: string, updatedAt: string): Product[] {
   const productsByKey = new Map<string, Product>();
 
@@ -177,6 +208,55 @@ function normalizeProducts(rawProducts: RawProduct[], url: string, updatedAt: st
   }
 
   return Array.from(productsByKey.values());
+}
+
+function normalizeJinritemaiProducts(
+  rawProducts: RawProduct[],
+  url: string,
+  updatedAt: string,
+  existingProducts: Product[],
+): NormalizedProducts {
+  const existingByKey = buildProductMap(existingProducts);
+  const productsByKey = new Map<string, Product>();
+  const explicitlyOfflineProductKeys = new Set<string>();
+
+  for (const rawProduct of rawProducts) {
+    const name = readFirstString(rawProduct, NAME_KEYS);
+    const spec = readFirstString(rawProduct, SPEC_KEYS) || '-';
+    const offline = isJinritemaiProductOffline(rawProduct);
+
+    if (!name) {
+      continue;
+    }
+
+    const key = productKey({ name, spec, url });
+    const existingProduct = existingByKey.get(key);
+    const parsedPrice = readFirstNumber(rawProduct, PRICE_KEYS);
+    if (!offline && parsedPrice === null) {
+      continue;
+    }
+    if (!offline && explicitlyOfflineProductKeys.has(key)) {
+      continue;
+    }
+
+    productsByKey.set(key, {
+      name,
+      spec,
+      url,
+      price: parsedPrice ?? existingProduct?.price ?? 0,
+      stock: offline ? 0 : readFirstNumber(rawProduct, STOCK_KEYS) ?? UNKNOWN_STOCK,
+      updatedAt,
+    });
+
+    if (offline) {
+      explicitlyOfflineProductKeys.add(key);
+    }
+  }
+
+  return {
+    products: Array.from(productsByKey.values()),
+    explicitlyOfflineProductKeys,
+  };
 }
 
 function productKey(product: Pick<Product, 'name' | 'spec' | 'url'>): string {
@@ -213,6 +293,7 @@ function buildProductAlerts(
   currentProducts: Product[],
   checkedAt: string,
   stockAlertThreshold: number,
+  explicitlyOfflineProductKeys = new Set<string>(),
 ): ProductAlert[] {
   const alerts: ProductAlert[] = [];
   const existingByKey = buildProductMap(existingProducts);
@@ -220,6 +301,16 @@ function buildProductAlerts(
 
   for (const currentProduct of currentProducts) {
     const existingProduct = existingByKey.get(productKey(currentProduct));
+    if (explicitlyOfflineProductKeys.has(productKey(currentProduct))) {
+      if (!existingProduct || existingProduct.stock !== 0) {
+        alerts.push(createProductAlert(currentProduct, ['missing'], checkedAt, stockAlertThreshold, {
+          previousPrice: existingProduct?.price,
+          previousStock: existingProduct?.stock,
+        }));
+      }
+      continue;
+    }
+
     const hitTypes: ProductAlertHitType[] = [];
 
     if (existingProduct && existingProduct.price < currentProduct.price) {
@@ -259,7 +350,7 @@ function buildProductAlerts(
   return alerts;
 }
 
-function extractProducts(result: ExecutionResult, url: string, updatedAt: string): Product[] {
+function extractRawProducts(result: ExecutionResult): RawProduct[] {
   if (!result.success) {
     throw new WorkflowUserError(
       result.error ? `商品提取接口调用失败：${result.error}` : '商品提取接口调用失败。',
@@ -280,6 +371,11 @@ function extractProducts(result: ExecutionResult, url: string, updatedAt: string
     throw new WorkflowUserError('商品提取结果中未找到可识别的商品列表。');
   }
 
+  return rawProducts;
+}
+
+function extractProducts(result: ExecutionResult, url: string, updatedAt: string): Product[] {
+  const rawProducts = extractRawProducts(result);
   const products = normalizeProducts(rawProducts, url, updatedAt);
   if (products.length === 0) {
     throw new WorkflowUserError('商品列表中没有可写入的有效商品。');
@@ -320,6 +416,117 @@ function applyProcessResult(summary: WorkflowSummary, result: SourceProcessResul
   summary.errors.push(...result.errors);
 }
 
+async function recordSourceFailure(
+  source: Source,
+  sourceTable: SourceTable,
+  checkedAt: string,
+  error: unknown,
+): Promise<SourceProcessResult> {
+  const result = emptySourceProcessResult();
+  const message = errorMessage(error);
+  result.failedUrls = 1;
+  result.errors.push({ url: source.url, message });
+
+  try {
+    if (source.id !== undefined) {
+      await sourceTable.update(source.id, {
+        lastCheckedAt: checkedAt,
+        lastError: message,
+        updatedAt: checkedAt,
+      });
+    }
+  } catch (statusError) {
+    result.errors.push({
+      url: source.url,
+      message: `记录 URL 错误状态失败：${errorMessage(statusError)}`,
+    });
+  }
+
+  return result;
+}
+
+async function persistSourceProducts(
+  source: Source,
+  normalizedProducts: NormalizedProducts,
+  checkedAt: string,
+  db: Dexie,
+  sourceTable: SourceTable,
+  productTable: ProductTable,
+  productAlertTable: ProductAlertTable,
+  stockAlertThreshold: number,
+): Promise<SourceProcessResult> {
+  const resultSummary = emptySourceProcessResult();
+  const { products, explicitlyOfflineProductKeys } = normalizedProducts;
+
+  const successCounts = await db.transaction('rw', sourceTable, productTable, productAlertTable, async () => {
+    const counts = {
+      updatedProducts: 0,
+      zeroedProducts: 0,
+      alertRecordsCreated: 0,
+    };
+    const existingProducts = await productTable.where('url').equals(source.url).toArray() as Product[];
+    const existingByKey = buildProductMap(existingProducts);
+    const currentProductKeys = new Set(products.map(productKey));
+    const alerts = buildProductAlerts(
+      existingProducts,
+      products,
+      checkedAt,
+      stockAlertThreshold,
+      explicitlyOfflineProductKeys,
+    );
+
+    if (alerts.length > 0) {
+      await productAlertTable.bulkAdd(alerts);
+      counts.alertRecordsCreated += alerts.length;
+    }
+
+    for (const product of products) {
+      const existingProduct = existingByKey.get(productKey(product));
+      if (
+        explicitlyOfflineProductKeys.has(productKey(product)) &&
+        existingProduct &&
+        existingProduct.stock !== 0
+      ) {
+        counts.zeroedProducts += 1;
+      }
+      await upsertProduct(productTable, product);
+      counts.updatedProducts += 1;
+    }
+
+    for (const existingProduct of existingProducts) {
+      if (currentProductKeys.has(productKey(existingProduct)) || existingProduct.stock === 0) {
+        continue;
+      }
+
+      if (existingProduct.id === undefined) {
+        continue;
+      }
+
+      await productTable.update(existingProduct.id, {
+        stock: 0,
+        updatedAt: checkedAt,
+      });
+      counts.zeroedProducts += 1;
+    }
+
+    if (source.id !== undefined) {
+      await sourceTable.update(source.id, {
+        lastCheckedAt: checkedAt,
+        lastError: undefined,
+        updatedAt: checkedAt,
+      });
+    }
+
+    return counts;
+  });
+
+  resultSummary.updatedProducts = successCounts.updatedProducts;
+  resultSummary.zeroedProducts = successCounts.zeroedProducts;
+  resultSummary.alertRecordsCreated = successCounts.alertRecordsCreated;
+  resultSummary.succeededUrls = 1;
+  return resultSummary;
+}
+
 async function processSource(
   source: Source,
   apis: WorkflowApis,
@@ -330,90 +537,123 @@ async function processSource(
   stockAlertThreshold: number,
 ): Promise<SourceProcessResult> {
   const checkedAt = new Date().toISOString();
-  const resultSummary = emptySourceProcessResult();
 
   try {
     const result = await apis.www_1688_com_get_sku_list_from_ur_0fuwor(source.url);
     const products = extractProducts(result, source.url, checkedAt);
-
-    const successCounts = await db.transaction('rw', sourceTable, productTable, productAlertTable, async () => {
-      const counts = {
-        updatedProducts: 0,
-        zeroedProducts: 0,
-        alertRecordsCreated: 0,
-      };
-      const existingProducts = await productTable.where('url').equals(source.url).toArray() as Product[];
-      const currentProductKeys = new Set(products.map(productKey));
-      const alerts = buildProductAlerts(existingProducts, products, checkedAt, stockAlertThreshold);
-
-      if (alerts.length > 0) {
-        await productAlertTable.bulkAdd(alerts);
-        counts.alertRecordsCreated += alerts.length;
-      }
-
-      for (const product of products) {
-        await upsertProduct(productTable, product);
-        counts.updatedProducts += 1;
-      }
-
-      for (const existingProduct of existingProducts) {
-        if (currentProductKeys.has(productKey(existingProduct)) || existingProduct.stock === 0) {
-          continue;
-        }
-
-        if (existingProduct.id === undefined) {
-          continue;
-        }
-
-        await productTable.update(existingProduct.id, {
-          stock: 0,
-          updatedAt: checkedAt,
-        });
-        counts.zeroedProducts += 1;
-      }
-
-      if (source.id !== undefined) {
-        await sourceTable.update(source.id, {
-          lastCheckedAt: checkedAt,
-          lastError: undefined,
-          updatedAt: checkedAt,
-        });
-      }
-
-      return counts;
-    });
-
-    resultSummary.updatedProducts = successCounts.updatedProducts;
-    resultSummary.zeroedProducts = successCounts.zeroedProducts;
-    resultSummary.alertRecordsCreated = successCounts.alertRecordsCreated;
-    resultSummary.succeededUrls = 1;
+    return await persistSourceProducts(
+      source,
+      { products, explicitlyOfflineProductKeys: new Set<string>() },
+      checkedAt,
+      db,
+      sourceTable,
+      productTable,
+      productAlertTable,
+      stockAlertThreshold,
+    );
   } catch (error) {
-    const message = errorMessage(error);
-    resultSummary.failedUrls = 1;
-    resultSummary.errors.push({ url: source.url, message });
-
-    try {
-      if (source.id !== undefined) {
-        await sourceTable.update(source.id, {
-          lastCheckedAt: checkedAt,
-          lastError: message,
-          updatedAt: checkedAt,
-        });
-      }
-    } catch (statusError) {
-      resultSummary.errors.push({
-        url: source.url,
-        message: `记录 URL 错误状态失败：${errorMessage(statusError)}`,
-      });
-    }
-
+    const resultSummary = await recordSourceFailure(source, sourceTable, checkedAt, error);
     if (error instanceof CaptchaRequiredError) {
       error.processResult = resultSummary;
       throw error;
     }
+    return resultSummary;
+  }
+}
+
+async function processJinritemaiSources(
+  sources: Source[],
+  apis: WorkflowApis,
+  db: Dexie,
+  sourceTable: SourceTable,
+  productTable: ProductTable,
+  productAlertTable: ProductAlertTable,
+  stockAlertThreshold: number,
+): Promise<ProcessedSourceResult[]> {
+  if (sources.length === 0) {
+    return [];
   }
 
-  return resultSummary;
+  const checkedAt = new Date().toISOString();
+  let rawProducts: RawProduct[];
+
+  try {
+    const result = await apis.buyin_jinritemai_com_get_douyin_product_d_o2bup6(
+      JSON.stringify(sources.map((source) => source.url)),
+    );
+    rawProducts = extractRawProducts(result);
+  } catch (error) {
+    const processedResults = await Promise.all(
+      sources.map(async (source) => ({
+        source,
+        result: await recordSourceFailure(source, sourceTable, checkedAt, error),
+      })),
+    );
+
+    if (error instanceof CaptchaRequiredError) {
+      error.processedResults = processedResults;
+      throw error;
+    }
+    return processedResults;
+  }
+
+  const sourcesByNormalizedUrl = new Map<string, Source>();
+  for (const source of sources) {
+    const normalizedUrl = normalizeUrlForMatch(source.url);
+    if (normalizedUrl) {
+      sourcesByNormalizedUrl.set(normalizedUrl, source);
+    }
+  }
+
+  const rawProductsBySourceUrl = new Map<string, RawProduct[]>();
+  for (const rawProduct of rawProducts) {
+    const rawProductUrl = normalizeUrlForMatch(readFirstString(rawProduct, JINRITEMAI_URL_KEYS));
+    const source = rawProductUrl ? sourcesByNormalizedUrl.get(rawProductUrl) : undefined;
+    if (!source) {
+      continue;
+    }
+    const sourceProducts = rawProductsBySourceUrl.get(source.url) ?? [];
+    sourceProducts.push(rawProduct);
+    rawProductsBySourceUrl.set(source.url, sourceProducts);
+  }
+
+  const processedResults: ProcessedSourceResult[] = [];
+  for (const source of sources) {
+    try {
+      const sourceRawProducts = rawProductsBySourceUrl.get(source.url) ?? [];
+      const existingProducts = await productTable.where('url').equals(source.url).toArray() as Product[];
+      const normalizedProducts = normalizeJinritemaiProducts(
+        sourceRawProducts,
+        source.url,
+        checkedAt,
+        existingProducts,
+      );
+      if (normalizedProducts.products.length === 0) {
+        throw new WorkflowUserError('批量商品提取结果中未找到该 URL 的可写入商品。');
+      }
+
+      processedResults.push({
+        source,
+        result: await persistSourceProducts(
+          source,
+          normalizedProducts,
+          checkedAt,
+          db,
+          sourceTable,
+          productTable,
+          productAlertTable,
+          stockAlertThreshold,
+        ),
+      });
+    } catch (error) {
+      processedResults.push({
+        source,
+        result: await recordSourceFailure(source, sourceTable, checkedAt, error),
+      });
+    }
+  }
+
+  return processedResults;
 }
 
 async function processSourcesSequentially(
@@ -484,6 +724,8 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
   const settings = await getAppSettings(settingsTable);
   const allSources = await sourceTable.toArray();
   const sources = allSources.filter((source) => source.isInvalid !== true);
+  const jinritemaiSources = sources.filter((source) => isJinritemaiUrl(source.url));
+  const sequentialSources = sources.filter((source) => !isJinritemaiUrl(source.url));
   const summary: WorkflowSummary = {
     totalUrls: sources.length,
     succeededUrls: 0,
@@ -502,8 +744,17 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
   let retriedFailedSourceCount = 0;
 
   try {
-    const firstPassResults = await processSourcesSequentially(
-      sources,
+    const firstJinritemaiPassResults = await processJinritemaiSources(
+      jinritemaiSources,
+      apis,
+      db,
+      sourceTable,
+      productTable,
+      productAlertTable,
+      settings.stockAlertThreshold,
+    );
+    const firstSequentialPassResults = await processSourcesSequentially(
+      sequentialSources,
       apis,
       db,
       sourceTable,
@@ -512,20 +763,41 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
       settings.stockAlertThreshold,
       settings.monitorHourlyRate,
     );
-    const failedSources = firstPassResults
+
+    const failedJinritemaiSources = firstJinritemaiPassResults
+      .filter(({ result }) => result.failedUrls > 0)
+      .map(({ source }) => source);
+    const failedSequentialSources = firstSequentialPassResults
       .filter(({ result }) => result.failedUrls > 0)
       .map(({ source }) => source);
 
-    for (const { result } of firstPassResults) {
+    for (const { result } of [...firstJinritemaiPassResults, ...firstSequentialPassResults]) {
       if (result.succeededUrls > 0) {
         applyProcessResult(summary, result);
       }
     }
 
-    if (failedSources.length > 0) {
-      retriedFailedSourceCount = failedSources.length;
+    if (failedJinritemaiSources.length > 0) {
+      retriedFailedSourceCount += failedJinritemaiSources.length;
+      const retryResults = await processJinritemaiSources(
+        failedJinritemaiSources,
+        apis,
+        db,
+        sourceTable,
+        productTable,
+        productAlertTable,
+        settings.stockAlertThreshold,
+      );
+
+      for (const { result } of retryResults) {
+        applyProcessResult(summary, result);
+      }
+    }
+
+    if (failedSequentialSources.length > 0) {
+      retriedFailedSourceCount += failedSequentialSources.length;
       const retryResults = await processSourcesSequentially(
-        failedSources,
+        failedSequentialSources,
         apis,
         db,
         sourceTable,
@@ -549,7 +821,7 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
 
   const result: WorkflowResult & { data: WorkflowSummary } = {
     success: summary.failedUrls === 0,
-    message: `Workflow completed sequentially; retried ${retriedFailedSourceCount} failed URLs once after the first pass: ${summary.succeededUrls}/${summary.totalUrls} URLs succeeded, ${summary.failedUrls} URLs failed, ${summary.skippedInvalidUrls} invalid URLs skipped, ${summary.updatedProducts} products updated, ${summary.zeroedProducts} products marked out of stock, ${summary.alertRecordsCreated} alert records created.`,
+    message: `Workflow completed with domain routing; retried ${retriedFailedSourceCount} failed URLs once after the first pass: ${summary.succeededUrls}/${summary.totalUrls} URLs succeeded, ${summary.failedUrls} URLs failed, ${summary.skippedInvalidUrls} invalid URLs skipped, ${summary.updatedProducts} products updated, ${summary.zeroedProducts} products marked out of stock, ${summary.alertRecordsCreated} alert records created.`,
     data: summary,
   };
 
