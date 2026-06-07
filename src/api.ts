@@ -30,7 +30,8 @@ export interface ExecutionResult {
  * WorkflowApis interface - methods generated from your API dependencies
  */
 export interface WorkflowApis {
-  get_sku_list_from_url: (product_url: string) => Promise<ExecutionResult>;
+  www_1688_com_get_sku_list_from_ur_0fuwor: (product_url: string) => Promise<ExecutionResult>;
+  buyin_jinritemai_com_get_douyin_product_d_o2bup6: () => Promise<ExecutionResult>;
 }
 
 
@@ -44,10 +45,22 @@ export function createWorkflowApis(agent: Agent): WorkflowApis {
    * 获取商品数组，每一项包含商品名字、价格和库存数。
    * @endpoint /v1/custom/www-1688-com-get-sku-list-from-ur-0fuwor
    */
-  async get_sku_list_from_url(product_url: string): Promise<ExecutionResult> {
+  async www_1688_com_get_sku_list_from_ur_0fuwor(product_url: string): Promise<ExecutionResult> {
     const { data } = await agent.call<ExecutionResult>('/v1/custom/www-1688-com-get-sku-list-from-ur-0fuwor', {
       method: 'POST',
       body: { product_url },
+    });
+    return data;
+  },
+
+  /**
+   * Get Douyin Product Data
+   * 获取抖音商品数据
+   * @endpoint /v1/custom/buyin-jinritemai-com-get-douyin-product-d-o2bup6
+   */
+  async buyin_jinritemai_com_get_douyin_product_d_o2bup6(): Promise<ExecutionResult> {
+    const { data } = await agent.call<ExecutionResult>('/v1/custom/buyin-jinritemai-com-get-douyin-product-d-o2bup6', {
+      method: 'POST',
     });
     return data;
   },

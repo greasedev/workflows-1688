@@ -46,10 +46,10 @@ type ProcessedSourceResult = {
 };
 
 const ARRAY_KEYS = ['products', 'skus', 'data', 'items', 'list', 'result'];
-const NAME_KEYS = ['name', 'title', 'productName', 'skuName', '商品名称', '商品名字', '名称'];
-const SPEC_KEYS = ['spec', 'specification', '规格', '商品规格'];
-const PRICE_KEYS = ['price', 'salePrice', 'offerPrice', 'amount', '价格', '售价'];
-const STOCK_KEYS = ['stock', 'inventory', 'quantity', '库存', '库存数', '数量'];
+const NAME_KEYS = ['name', 'title'];
+const SPEC_KEYS = ['spec'];
+const PRICE_KEYS = ['price'];
+const STOCK_KEYS = ['stock', 'stock_num_sum'];
 const CAPTCHA_REQUIRED_MESSAGE = 'captcha-required';
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const UNKNOWN_STOCK = -1;
@@ -333,7 +333,7 @@ async function processSource(
   const resultSummary = emptySourceProcessResult();
 
   try {
-    const result = await apis.get_sku_list_from_url(source.url);
+    const result = await apis.www_1688_com_get_sku_list_from_ur_0fuwor(source.url);
     const products = extractProducts(result, source.url, checkedAt);
 
     const successCounts = await db.transaction('rw', sourceTable, productTable, productAlertTable, async () => {
