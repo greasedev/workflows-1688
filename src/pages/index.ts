@@ -12,7 +12,7 @@ type ImportStats = {
   added: number;
   duplicate: number;
   invalid: number;
-  non1688: number;
+  unsupportedDomain: number;
   removedSources: number;
   removedProducts: number;
 };
@@ -53,6 +53,7 @@ type PageState = {
 const PAGE_STATE_STORAGE_KEY = "product-monitor-page-state";
 const PAGE_STATE_VERSION = 3;
 const PAGE_SIZE = 20;
+const SUPPORTED_IMPORT_DOMAINS = ["1688.com", "jinritemai.com"];
 const ACTIVE_PANEL_VALUES: ActivePanel[] = ["alert", "source", "product"];
 const SOURCE_STATUS_FILTER_VALUES: SourceStatusFilter[] = [
   "all",
@@ -362,7 +363,7 @@ function confirmImportRemoval(stats: ImportStats): Promise<boolean> {
     showImportModal(
       "确认导入并删除",
       [
-        "本次导入会以 Excel 中的有效 1688 URL 作为完整监控清单。",
+        "本次导入会以 Excel 中符合支持域名要求的 URL 作为完整监控清单。",
         "Excel 中不存在的 URL 将被删除，并删除这些 URL 关联的商品。",
         "",
         formatImportStats(stats),
@@ -525,8 +526,10 @@ function parseSettingsForm(): Pick<AppSettings, "monitorHourlyRate" | "stockAler
   };
 }
 
-function is1688Hostname(hostname: string): boolean {
-  return hostname === "1688.com" || hostname.endsWith(".1688.com");
+function isSupportedImportHostname(hostname: string): boolean {
+  return SUPPORTED_IMPORT_DOMAINS.some(
+    (domain) => hostname === domain || hostname.endsWith(`.${domain}`),
+  );
 }
 
 function normalizeImportUrl(value: unknown): { url: string | null; isValidUrl: boolean } {
@@ -538,7 +541,7 @@ function normalizeImportUrl(value: unknown): { url: string | null; isValidUrl: b
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
       return { url: null, isValidUrl: false };
     }
-    if (!is1688Hostname(parsed.hostname.toLowerCase())) {
+    if (!isSupportedImportHostname(parsed.hostname.toLowerCase())) {
       return { url: null, isValidUrl: true };
     }
     return { url: parsed.href, isValidUrl: true };
@@ -712,7 +715,7 @@ function createEmptyImportStats(): ImportStats {
     added: 0,
     duplicate: 0,
     invalid: 0,
-    non1688: 0,
+    unsupportedDomain: 0,
     removedSources: 0,
     removedProducts: 0,
   };
@@ -723,7 +726,7 @@ function formatImportStats(stats: ImportStats): string {
     `新增 URL：${stats.added} 个`,
     `重复 URL：${stats.duplicate} 个`,
     `无效或空值：${stats.invalid} 个`,
-    `非1688 URL：${stats.non1688} 个`,
+    `非支持域名 URL：${stats.unsupportedDomain} 个`,
     `删除 URL：${stats.removedSources} 个`,
     `删除商品：${stats.removedProducts} 个`,
   ].join("\n");
@@ -752,7 +755,7 @@ async function previewImportExcel(file: File): Promise<ImportPreview> {
       const { url, isValidUrl } = normalizeImportUrl(cell);
       if (!url) {
         if (isValidUrl) {
-          stats.non1688 += 1;
+          stats.unsupportedDomain += 1;
         }
         continue;
       }
