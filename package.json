@@ -3,14 +3,14 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "build": "npx tsx node_modules/@greaseclaw/workflow-sdk/bin/workflow-build.mjs src/workflows dist",
-    "build:pages": "npx tsx node_modules/@greaseclaw/workflow-sdk/bin/page-build.mjs src/pages dist/pages",
-    "dev": "npx tsx node_modules/@greaseclaw/workflow-sdk/bin/workflow-dev.mjs",
-    "dev:pages": "npx tsx node_modules/@greaseclaw/workflow-sdk/bin/page-dev.mjs src/pages 3000",
+    "build": "npx tsx node_modules/@greasedev/workflow-sdk/bin/workflow-build.mjs src/workflows dist",
+    "build:pages": "npx tsx node_modules/@greasedev/workflow-sdk/bin/page-build.mjs src/pages dist/pages",
+    "dev": "npx tsx node_modules/@greasedev/workflow-sdk/bin/workflow-dev.mjs",
+    "dev:pages": "npx tsx node_modules/@greasedev/workflow-sdk/bin/page-dev.mjs src/pages 3000",
     "zip": "npm run build && npm run build:pages && rm -f workflows.zip && zip -r workflows.zip src/ dist package.json tsconfig.json"
   },
   "dependencies": {
-    "@greaseclaw/workflow-sdk": "github:greasedev/workflow-sdk#main",
+    "@greasedev/workflow-sdk": "github:greasedev/workflow-sdk#main",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

@@ -8,9 +8,9 @@ importers:
 
   .:
     dependencies:
-      '@greaseclaw/workflow-sdk':
+      '@greasedev/workflow-sdk':
         specifier: github:greasedev/workflow-sdk#main
-        version: '@greasedev/workflow-sdk@https://codeload.github.com/greasedev/workflow-sdk/tar.gz/e6bea5c1d622a7e51f3e665149e905d8695d46f6(ws@8.21.0)(zod@3.25.76)'
+        version: https://codeload.github.com/greasedev/workflow-sdk/tar.gz/e6bea5c1d622a7e51f3e665149e905d8695d46f6(ws@8.21.0)(zod@3.25.76)
       xlsx:
         specifier: ^0.18.5
         version: 0.18.5

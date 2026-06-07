@@ -1,4 +1,4 @@
-import { Agent } from "@greaseclaw/workflow-sdk";
+import { Agent } from "@greasedev/workflow-sdk";
 
 export const DB_TABLES = {
   source: "source",

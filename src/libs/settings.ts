@@ -1,4 +1,4 @@
-import type { Dexie } from "@greaseclaw/workflow-sdk";
+import type { Dexie } from "@greasedev/workflow-sdk";
 import type { AppSettings } from "../models/types";
 
 export const APP_SETTINGS_ID = "global" as const;

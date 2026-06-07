@@ -4,7 +4,7 @@
  * Do not edit manually - changes will be overwritten.
  */
 
-import { Agent } from '@greaseclaw/workflow-sdk';
+import { Agent } from '@greasedev/workflow-sdk';
 
 /**
  * Task status type
@@ -31,7 +31,7 @@ export interface ExecutionResult {
  */
 export interface WorkflowApis {
   www_1688_com_get_sku_list_from_ur_0fuwor: (product_url: string) => Promise<ExecutionResult>;
-  buyin_jinritemai_com_get_douyin_product_d_o2bup6: () => Promise<ExecutionResult>;
+  buyin_jinritemai_com_get_douyin_product_d_o2bup6: (product_urls_json_string: string) => Promise<ExecutionResult>;
 }
 
 
@@ -58,9 +58,10 @@ export function createWorkflowApis(agent: Agent): WorkflowApis {
    * 获取抖音商品数据
    * @endpoint /v1/custom/buyin-jinritemai-com-get-douyin-product-d-o2bup6
    */
-  async buyin_jinritemai_com_get_douyin_product_d_o2bup6(): Promise<ExecutionResult> {
+  async buyin_jinritemai_com_get_douyin_product_d_o2bup6(product_urls_json_string: string): Promise<ExecutionResult> {
     const { data } = await agent.call<ExecutionResult>('/v1/custom/buyin-jinritemai-com-get-douyin-product-d-o2bup6', {
       method: 'POST',
+      body: { product_urls_json_string },
     });
     return data;
   },

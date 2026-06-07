@@ -24,7 +24,7 @@
  * ---
  */
 
-import { Agent, type Dexie, type WorkflowContext, type WorkflowResult } from '@greaseclaw/workflow-sdk';
+import { Agent, type Dexie, type WorkflowContext, type WorkflowResult } from '@greasedev/workflow-sdk';
 import { createWorkflowApis, type ExecutionResult } from '../api';
 import { DB_TABLES, initDB } from '../libs/db';
 import { getAppSettings } from '../libs/settings';

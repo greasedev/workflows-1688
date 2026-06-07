@@ -1,4 +1,4 @@
-import { Agent, AgentOptions } from "@greaseclaw/workflow-sdk";
+import { Agent, AgentOptions } from "@greasedev/workflow-sdk";
 import * as XLSX from "xlsx";
 import { DB_TABLES, initDB } from "../libs/db";
 import {
