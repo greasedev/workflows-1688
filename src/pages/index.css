@@ -656,6 +656,7 @@ tr:last-child td {
   margin-bottom: 20px;
   color: var(--text-secondary);
   font-size: 14px;
+  overflow-wrap: anywhere;
   white-space: pre-line;
 }
 
