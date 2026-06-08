@@ -35,7 +35,7 @@
   - 新增 `settings` 表，使用 `id = global` 保存唯一全局设置记录，索引为 `&id, updatedAt`。
   - 如 schema 版本需要变更，使用新的 Dexie 版本迁移，避免破坏已有数据；规格字段升级使用 `[name+spec+url]` 约束。
 - 新增共享设置 helper：
-  - 默认值为 `monitorHourlyRate = 180`（每分钟 3 个）、`stockAlertThreshold = 100`，三类报警默认全部激活。
+  - 默认值为 `monitorHourlyRate = 180`（每组每分钟 3 次接口调用）、`stockAlertThreshold = 100`，三类报警默认全部激活。
   - `monitorHourlyRate` 校验范围为 `1-360`。
   - `stockAlertThreshold` 必须为大于等于 `1` 的整数。
   - `enabledAlertTypes` 至少包含一个有效报警类型；旧设置缺失该字段时自动补齐全部报警类型。
@@ -188,13 +188,13 @@ URL 监控列表交互：
   - 读取 `source` 表中的所有 URL。
   - 跳过 `isInvalid === true` 的失效 URL，不调用提取 API。
   - 读取 `settings` 表中的全局设置。
-  - 按域名拆分有效 URL；先将全部 jinritemai URL 通过 `JSON.stringify` 转为数组字符串并调用一次批量接口，再逐个处理其他 URL。
+  - 按域名拆分有效 URL；先将 jinritemai URL 按来源顺序拆分为每批最多 90 个，通过 `JSON.stringify` 转为数组字符串并串行调用批量接口，再逐个处理其他 URL。
   - jinritemai 批量结果按商品 `url` 字段匹配来源；非请求 URL 的返回商品忽略。
-  - jinritemai 批量调用不参与 `monitorHourlyRate` 限速。
-  - 根据 `monitorHourlyRate` 计算请求间隔：第一个 URL 立即请求，每次请求完成后用 `3600000 / monitorHourlyRate` 减去本次请求耗时得到实际等待时间；请求耗时超过间隔时，下一个 URL 立即请求。
+  - jinritemai 与其他来源使用独立限速器；每个 jinritemai 批次和每个其他来源单 URL 调用均计为一次请求。
+  - 根据 `monitorHourlyRate` 计算同组请求开始时间的最小间隔；请求耗时计入间隔，请求耗时超过间隔时同组下一次请求立即开始，首轮与重试共享同组限速时间线。
   - 单个 URL 失败时记录错误并继续下一个 URL。
   - 如果 `task.extract_data` 可解析为数组且第一个元素为 `captcha-required`，写入当前 URL 中文错误并立即停止工作流，不处理后续 URL，不执行失败重试，最终返回 `message: "captcha-required"`。
-  - jinritemai 批量调用失败时整批 URL 失败；首轮结束后仅将失败 URL 重新组成 JSON 数组批量重试一次。
+  - jinritemai 批量调用失败时当前批次 URL 失败并继续后续批次；首轮结束后仅将失败 URL 按每批最多 90 个重新组成 JSON 数组串行重试一次。
   - jinritemai 批量返回缺少某个请求 URL 的可处理商品时，该 URL 失败且不修改历史商品。
 - 实现 API 结果解析：
   - 优先读取 `task.extract_data`。
@@ -297,7 +297,8 @@ URL 监控列表交互：
 - jinritemai URL 的 query string 包含 `id=12345` 时，三类导出的 ID 均为 `12345`；缺少或空 `id` 时为空，其他 URL 保持现有 ID 提取规则。
 - 工作流处理多个 URL，其中一个失败时整体继续执行。
 - 工作流遇到失效 URL 时跳过，并在摘要中统计跳过数量。
-- 工作流先批量处理全部 jinritemai URL，再逐个处理其他有效 URL；jinritemai 批量调用不参与限速，首轮结束后仅批量重试失败的 jinritemai URL，其他失败 URL 再逐个重试一次。
+- 工作流先按每批最多 90 个串行处理全部 jinritemai URL，再逐个处理其他有效 URL；jinritemai 与其他来源独立限速，同组首轮与重试共享限速时间线，首轮结束后仅分批重试失败的 jinritemai URL，其他失败 URL 再逐个重试一次。
+- 90、91、180、181 个 jinritemai URL 分别产生 1、2、2、3 次首轮批量调用，每批不超过 90 个且每批计为一次限速请求。
 - jinritemai 批量结果按商品 `url` 字段写入对应来源；未返回可处理商品的请求 URL 失败且历史商品保持不变。
 - jinritemai 商品 `live_add_enum` 包含 `下架` 时库存更新为 `0`，首次下架生成 `missing`，重复下架不重复报警。
 - jinritemai 接口价格 `1234` 写入数据库为 `12.34`，价格上涨比较和新报警均使用转换后的元价格；其他来源价格不转换。

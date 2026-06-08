@@ -48,6 +48,9 @@ type NormalizedProducts = {
   products: Product[];
   explicitlyOfflineProductKeys: Set<string>;
 };
+type RequestRateLimiter = {
+  waitForTurn: () => Promise<void>;
+};
 
 const ARRAY_KEYS = ['products', 'skus', 'data', 'items', 'list', 'result'];
 const NAME_KEYS = ['name', 'title'];
@@ -57,6 +60,7 @@ const STOCK_KEYS = ['stock', 'stock_num_sum'];
 const JINRITEMAI_URL_KEYS = ['url'];
 const JINRITEMAI_OFFLINE_KEY = 'live_add_enum';
 const JINRITEMAI_DOMAIN = 'jinritemai.com';
+const JINRITEMAI_BATCH_SIZE = 90;
 const CAPTCHA_REQUIRED_MESSAGE = 'captcha-required';
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const UNKNOWN_STOCK = -1;
@@ -98,6 +102,32 @@ function parseJsonValue(value: string): unknown {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function createRequestRateLimiter(monitorHourlyRate: number): RequestRateLimiter {
+  const requestIntervalMs = ONE_HOUR_MS / monitorHourlyRate;
+  let lastRequestStartedAt: number | null = null;
+
+  return {
+    async waitForTurn() {
+      if (lastRequestStartedAt !== null) {
+        const elapsedMs = Date.now() - lastRequestStartedAt;
+        const remainingIntervalMs = Math.max(0, requestIntervalMs - elapsedMs);
+        if (remainingIntervalMs > 0) {
+          await delay(remainingIntervalMs);
+        }
+      }
+      lastRequestStartedAt = Date.now();
+    },
+  };
+}
+
+function chunkSources(sources: Source[], batchSize: number): Source[][] {
+  const batches: Source[][] = [];
+  for (let index = 0; index < sources.length; index += batchSize) {
+    batches.push(sources.slice(index, index + batchSize));
+  }
+  return batches;
 }
 
 function normalizeExtractData(value: unknown): unknown {
@@ -583,7 +613,7 @@ async function processSource(
   }
 }
 
-async function processJinritemaiSources(
+async function processJinritemaiSourceBatch(
   sources: Source[],
   apis: WorkflowApis,
   db: Dexie,
@@ -592,6 +622,7 @@ async function processJinritemaiSources(
   productAlertTable: ProductAlertTable,
   stockAlertThreshold: number,
   enabledAlertTypes: ProductAlertHitType[],
+  rateLimiter: RequestRateLimiter,
 ): Promise<ProcessedSourceResult[]> {
   if (sources.length === 0) {
     return [];
@@ -601,6 +632,7 @@ async function processJinritemaiSources(
   let rawProducts: RawProduct[];
 
   try {
+    await rateLimiter.waitForTurn();
     const result = await apis.buyin_jinritemai_com_get_douyin_product_d_o2bup6(
       JSON.stringify(sources.map((source) => source.url)),
     );
@@ -680,6 +712,48 @@ async function processJinritemaiSources(
   return processedResults;
 }
 
+async function processJinritemaiSourcesInBatches(
+  sources: Source[],
+  apis: WorkflowApis,
+  db: Dexie,
+  sourceTable: SourceTable,
+  productTable: ProductTable,
+  productAlertTable: ProductAlertTable,
+  stockAlertThreshold: number,
+  enabledAlertTypes: ProductAlertHitType[],
+  rateLimiter: RequestRateLimiter,
+): Promise<ProcessedSourceResult[]> {
+  const processedResults: ProcessedSourceResult[] = [];
+
+  for (const batch of chunkSources(sources, JINRITEMAI_BATCH_SIZE)) {
+    try {
+      processedResults.push(
+        ...(await processJinritemaiSourceBatch(
+          batch,
+          apis,
+          db,
+          sourceTable,
+          productTable,
+          productAlertTable,
+          stockAlertThreshold,
+          enabledAlertTypes,
+          rateLimiter,
+        )),
+      );
+    } catch (error) {
+      if (error instanceof CaptchaRequiredError) {
+        error.processedResults = [
+          ...processedResults,
+          ...(error.processedResults ?? []),
+        ];
+      }
+      throw error;
+    }
+  }
+
+  return processedResults;
+}
+
 async function processSourcesSequentially(
   sources: Source[],
   apis: WorkflowApis,
@@ -689,14 +763,13 @@ async function processSourcesSequentially(
   productAlertTable: ProductAlertTable,
   stockAlertThreshold: number,
   enabledAlertTypes: ProductAlertHitType[],
-  monitorHourlyRate: number,
+  rateLimiter: RequestRateLimiter,
 ): Promise<ProcessedSourceResult[]> {
   const processedResults: ProcessedSourceResult[] = [];
-  const requestIntervalMs = ONE_HOUR_MS / monitorHourlyRate;
 
-  for (const [index, source] of sources.entries()) {
-    const requestStartedAt = Date.now();
+  for (const source of sources) {
     try {
+      await rateLimiter.waitForTurn();
       const processedResult = {
         source,
         result: await processSource(
@@ -724,14 +797,6 @@ async function processSourcesSequentially(
         error.processedResults = processedResults;
       }
       throw error;
-    }
-
-    if (index < sources.length - 1) {
-      const elapsedMs = Date.now() - requestStartedAt;
-      const remainingIntervalMs = Math.max(0, requestIntervalMs - elapsedMs);
-      if (remainingIntervalMs > 0) {
-        await delay(remainingIntervalMs);
-      }
     }
   }
 
@@ -768,9 +833,11 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
   console.log('Executing product monitor workflow...');
 
   let retriedFailedSourceCount = 0;
+  const jinritemaiRateLimiter = createRequestRateLimiter(settings.monitorHourlyRate);
+  const sequentialRateLimiter = createRequestRateLimiter(settings.monitorHourlyRate);
 
   try {
-    const firstJinritemaiPassResults = await processJinritemaiSources(
+    const firstJinritemaiPassResults = await processJinritemaiSourcesInBatches(
       jinritemaiSources,
       apis,
       db,
@@ -779,6 +846,7 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
       productAlertTable,
       settings.stockAlertThreshold,
       settings.enabledAlertTypes,
+      jinritemaiRateLimiter,
     );
     const firstSequentialPassResults = await processSourcesSequentially(
       sequentialSources,
@@ -789,7 +857,7 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
       productAlertTable,
       settings.stockAlertThreshold,
       settings.enabledAlertTypes,
-      settings.monitorHourlyRate,
+      sequentialRateLimiter,
     );
 
     const failedJinritemaiSources = firstJinritemaiPassResults
@@ -807,7 +875,7 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
 
     if (failedJinritemaiSources.length > 0) {
       retriedFailedSourceCount += failedJinritemaiSources.length;
-      const retryResults = await processJinritemaiSources(
+      const retryResults = await processJinritemaiSourcesInBatches(
         failedJinritemaiSources,
         apis,
         db,
@@ -816,6 +884,7 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
         productAlertTable,
         settings.stockAlertThreshold,
         settings.enabledAlertTypes,
+        jinritemaiRateLimiter,
       );
 
       for (const { result } of retryResults) {
@@ -834,7 +903,7 @@ export async function execute(context: WorkflowContext): Promise<WorkflowResult>
         productAlertTable,
         settings.stockAlertThreshold,
         settings.enabledAlertTypes,
-        settings.monitorHourlyRate,
+        sequentialRateLimiter,
       );
 
       for (const { result } of retryResults) {
