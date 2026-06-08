@@ -54,7 +54,7 @@ const PAGE_STATE_STORAGE_KEY = "product-monitor-page-state";
 const PAGE_STATE_VERSION = 3;
 const PAGE_SIZE = 20;
 const SUPPORTED_IMPORT_DOMAINS = ["1688.com", "jinritemai.com"];
-const ACTIVE_PANEL_VALUES: ActivePanel[] = ["alert", "source", "product"];
+const ACTIVE_PANEL_VALUES: ActivePanel[] = ["source", "product", "alert"];
 const SOURCE_STATUS_FILTER_VALUES: SourceStatusFilter[] = [
   "all",
   "normal",
@@ -69,7 +69,7 @@ const ALERT_HIT_TYPE_FILTER_VALUES: AlertHitTypeFilter[] = [
 const alertPaginationState: PaginationState = { currentPage: 1 };
 const sourcePaginationState: PaginationState = { currentPage: 1 };
 const productPaginationState: PaginationState = { currentPage: 1 };
-let activePanel: ActivePanel = "alert";
+let activePanel: ActivePanel = "source";
 let alertHitTypeFilterValue: AlertHitTypeFilter = "all";
 let sourceStatusFilterValue: SourceStatusFilter = "all";
 const ALERT_HIT_TYPE_LABELS: Record<ProductAlertHitType, string> = {
@@ -98,10 +98,14 @@ const userManualCloseButton = getElement<HTMLButtonElement>(
   "userManualCloseButton",
 );
 const excelInput = getElement<HTMLInputElement>("excelInput");
+const exportMenuContainer = getElement<HTMLDivElement>("exportMenuContainer");
+const exportMenuButton = getElement<HTMLButtonElement>("exportMenuButton");
+const exportMenu = getElement<HTMLDivElement>("exportMenu");
 const exportErrorUrlButton = getElement<HTMLButtonElement>(
   "exportErrorUrlButton",
 );
 const exportAlertButton = getElement<HTMLButtonElement>("exportAlertButton");
+const exportProductButton = getElement<HTMLButtonElement>("exportProductButton");
 const settingsButton = getElement<HTMLButtonElement>("settingsButton");
 const importModal = getElement<HTMLDivElement>("importModal");
 const importModalTitle = getElement<HTMLDivElement>("importModalTitle");
@@ -256,7 +260,7 @@ function parseSavedPage(value: unknown): number {
 function defaultPageState(): PageState {
   return {
     version: PAGE_STATE_VERSION,
-    activePanel: "alert",
+    activePanel: "source",
     alertPage: 1,
     sourcePage: 1,
     productPage: 1,
@@ -855,7 +859,20 @@ async function importExcel(file: File): Promise<ImportStats> {
   return commitImportExcel(preview);
 }
 
-function extractNumericIdFromUrl(url: string): string {
+function extractProductIdFromUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.toLowerCase();
+    if (
+      hostname === "jinritemai.com" ||
+      hostname.endsWith(".jinritemai.com")
+    ) {
+      return parsed.searchParams.get("id") ?? "";
+    }
+  } catch {
+    return "";
+  }
+
   const htmlIndex = url.indexOf(".html");
   if (htmlIndex === -1) return "";
 
@@ -885,6 +902,15 @@ function downloadWorkbook(workbook: XLSX.WorkBook, filename: string) {
   URL.revokeObjectURL(objectUrl);
 }
 
+function setExportMenuOpen(open: boolean) {
+  exportMenu.hidden = !open;
+  exportMenuButton.setAttribute("aria-expanded", String(open));
+}
+
+function closeExportMenu() {
+  setExportMenuOpen(false);
+}
+
 async function exportErrorUrls() {
   const sources = await sourceTable.toArray();
   const errorSources = sources.filter((source) => Boolean(source.lastError));
@@ -896,7 +922,7 @@ async function exportErrorUrls() {
 
   const rows = errorSources.map((source) => ({
     URL: source.url,
-    ID: extractNumericIdFromUrl(source.url),
+    ID: extractProductIdFromUrl(source.url),
   }));
   const worksheet = XLSX.utils.json_to_sheet(rows, {
     header: ["URL", "ID"],
@@ -904,6 +930,43 @@ async function exportErrorUrls() {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, "异常URL");
   downloadWorkbook(workbook, `异常URL-${formatExportTimestamp()}.xlsx`);
+}
+
+async function exportProducts() {
+  const products = (await productTable.toArray()).sort((a, b) => {
+    const timeDiff =
+      new Date(b.updatedAt ?? 0).getTime() - new Date(a.updatedAt ?? 0).getTime();
+    return timeDiff || a.name.localeCompare(b.name, "zh-CN");
+  });
+
+  if (products.length === 0) {
+    showImportModal("导出提示", "暂无商品数据可导出。", "success");
+    return;
+  }
+
+  const rows = products.map((product) => ({
+    ID: extractProductIdFromUrl(product.url),
+    商品名称: product.name,
+    规格: product.spec,
+    价格: product.price,
+    库存: product.stock,
+    来源URL: product.url,
+    更新时间: formatDate(product.updatedAt),
+  }));
+  const worksheet = XLSX.utils.json_to_sheet(rows, {
+    header: [
+      "ID",
+      "商品名称",
+      "规格",
+      "价格",
+      "库存",
+      "来源URL",
+      "更新时间",
+    ],
+  });
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "商品信息");
+  downloadWorkbook(workbook, `商品信息-${formatExportTimestamp()}.xlsx`);
 }
 
 function sortAlertsByCheckedAt(alerts: ProductAlert[]): ProductAlert[] {
@@ -936,7 +999,7 @@ async function exportAlerts() {
     .map((alert) => alert.id)
     .filter((id): id is number => id !== undefined);
   const rows = alerts.map((alert) => ({
-    ID: extractNumericIdFromUrl(alert.url),
+    ID: extractProductIdFromUrl(alert.url),
     商品名称: alert.name,
     规格: alert.spec,
     命中类型: formatAlertHitTypeLines(alert),
@@ -964,6 +1027,26 @@ async function exportAlerts() {
   await productAlertTable.bulkDelete(exportedAlertIds);
   await loadDashboardData();
   showImportModal("清空完成", "本次已导出的监控报警数据已清空。", "success");
+}
+
+async function runExportAction(
+  button: HTMLButtonElement,
+  action: () => Promise<void>,
+  fallbackErrorMessage: string,
+) {
+  closeExportMenu();
+  button.disabled = true;
+  try {
+    await action();
+  } catch (error) {
+    showImportModal(
+      "导出失败",
+      error instanceof Error ? error.message : fallbackErrorMessage,
+      "error",
+    );
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function loadDashboardData() {
@@ -1274,33 +1357,25 @@ excelInput.addEventListener("change", async () => {
   }
 });
 
-exportErrorUrlButton.addEventListener("click", async () => {
-  exportErrorUrlButton.disabled = true;
-  try {
-    await exportErrorUrls();
-  } catch (error) {
-    showImportModal(
-      "导出失败",
-      error instanceof Error ? error.message : "导出异常 URL 失败。",
-      "error",
-    );
-  } finally {
-    exportErrorUrlButton.disabled = false;
-  }
+exportMenuButton.addEventListener("click", () => {
+  setExportMenuOpen(exportMenu.hidden);
 });
 
-exportAlertButton.addEventListener("click", async () => {
-  exportAlertButton.disabled = true;
-  try {
-    await exportAlerts();
-  } catch (error) {
-    showImportModal(
-      "导出失败",
-      error instanceof Error ? error.message : "导出监控报警失败。",
-      "error",
-    );
-  } finally {
-    exportAlertButton.disabled = false;
+exportAlertButton.addEventListener("click", () => {
+  void runExportAction(exportAlertButton, exportAlerts, "导出监控报警失败。");
+});
+
+exportErrorUrlButton.addEventListener("click", () => {
+  void runExportAction(exportErrorUrlButton, exportErrorUrls, "导出异常 URL 失败。");
+});
+
+exportProductButton.addEventListener("click", () => {
+  void runExportAction(exportProductButton, exportProducts, "导出商品失败。");
+});
+
+document.addEventListener("click", (event) => {
+  if (!exportMenuContainer.contains(event.target as Node)) {
+    closeExportMenu();
   }
 });
 
@@ -1388,6 +1463,7 @@ settingsForm.addEventListener("submit", async (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
+    closeExportMenu();
     closeImportModal();
     closeSettingsModal();
     closeUserManualModal();

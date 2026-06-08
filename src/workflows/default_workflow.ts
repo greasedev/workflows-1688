@@ -184,6 +184,10 @@ function isJinritemaiProductOffline(rawProduct: RawProduct): boolean {
   return String(rawProduct[JINRITEMAI_OFFLINE_KEY] ?? '').includes('下架');
 }
 
+function convertJinritemaiPriceToYuan(priceInCents: number): number {
+  return Math.round(priceInCents) / 100;
+}
+
 function normalizeProducts(rawProducts: RawProduct[], url: string, updatedAt: string): Product[] {
   const productsByKey = new Map<string, Product>();
 
@@ -231,8 +235,10 @@ function normalizeJinritemaiProducts(
 
     const key = productKey({ name, spec, url });
     const existingProduct = existingByKey.get(key);
-    const parsedPrice = readFirstNumber(rawProduct, PRICE_KEYS);
-    if (!offline && parsedPrice === null) {
+    const parsedPriceInCents = readFirstNumber(rawProduct, PRICE_KEYS);
+    const priceInYuan =
+      parsedPriceInCents === null ? null : convertJinritemaiPriceToYuan(parsedPriceInCents);
+    if (!offline && priceInYuan === null) {
       continue;
     }
     if (!offline && explicitlyOfflineProductKeys.has(key)) {
@@ -243,7 +249,7 @@ function normalizeJinritemaiProducts(
       name,
       spec,
       url,
-      price: parsedPrice ?? existingProduct?.price ?? 0,
+      price: priceInYuan ?? existingProduct?.price ?? 0,
       stock: offline ? 0 : readFirstNumber(rawProduct, STOCK_KEYS) ?? UNKNOWN_STOCK,
       updatedAt,
     });

@@ -19,22 +19,11 @@
         <div class="list-tabs" role="tablist" aria-label="监控列表切换">
           <button
             class="tab-btn active"
-            id="alertTab"
-            type="button"
-            data-panel="alert"
-            role="tab"
-            aria-selected="true"
-          >
-            <span>监控报警</span>
-            <span class="tab-count" id="alertCount">0</span>
-          </button>
-          <button
-            class="tab-btn"
             id="sourceTab"
             type="button"
             data-panel="source"
             role="tab"
-            aria-selected="false"
+            aria-selected="true"
           >
             <span>URL监控</span>
             <span class="tab-count" id="sourceCount">0</span>
@@ -50,18 +39,46 @@
             <span>商品查询</span>
             <span class="tab-count" id="productCount">0</span>
           </button>
+          <button
+            class="tab-btn"
+            id="alertTab"
+            type="button"
+            data-panel="alert"
+            role="tab"
+            aria-selected="false"
+          >
+            <span>监控报警</span>
+            <span class="tab-count" id="alertCount">0</span>
+          </button>
         </div>
         <div class="toolbar-actions">
           <label class="btn btn-primary file-import-btn">
             <input id="excelInput" type="file" accept=".xlsx,.xls,.csv" />
             <span>导入URL</span>
           </label>
-          <button class="btn btn-secondary" id="exportErrorUrlButton" type="button">
-            导出异常URL
-          </button>
-          <button class="btn btn-secondary" id="exportAlertButton" type="button">
-            导出监控报警
-          </button>
+          <div class="export-menu-container" id="exportMenuContainer">
+            <button
+              class="btn btn-secondary export-menu-toggle"
+              id="exportMenuButton"
+              type="button"
+              aria-expanded="false"
+              aria-haspopup="menu"
+            >
+              导出
+              <span class="export-menu-arrow" aria-hidden="true">▼</span>
+            </button>
+            <div class="export-menu" id="exportMenu" role="menu" hidden>
+              <button class="export-menu-item" id="exportErrorUrlButton" type="button" role="menuitem">
+                导出异常URL
+              </button>
+              <button class="export-menu-item" id="exportProductButton" type="button" role="menuitem">
+                导出商品
+              </button>
+              <button class="export-menu-item" id="exportAlertButton" type="button" role="menuitem">
+                导出监控报警
+              </button>
+            </div>
+          </div>
           <button class="btn btn-secondary settings-entry-btn" id="settingsButton" type="button">
             设置
           </button>
@@ -90,7 +107,13 @@
         </div>
       </div>
 
-      <section class="table-container" id="alertPanel" role="tabpanel" aria-labelledby="alertTab">
+      <section
+        class="table-container"
+        id="alertPanel"
+        role="tabpanel"
+        aria-labelledby="alertTab"
+        hidden
+      >
         <table>
           <thead>
             <tr>
@@ -129,7 +152,7 @@
         </div>
       </section>
 
-      <section class="table-container" id="sourcePanel" role="tabpanel" aria-labelledby="sourceTab" hidden>
+      <section class="table-container" id="sourcePanel" role="tabpanel" aria-labelledby="sourceTab">
         <table>
           <thead>
             <tr>
@@ -317,12 +340,13 @@
           <section class="manual-section">
             <h2>监控报警</h2>
             <ul>
-              <li>页面默认展示「监控报警」；顶部数字表示当前报警总数。</li>
+              <li>页面顶部 tab 顺序为「URL监控」「商品查询」「监控报警」；首次访问默认展示「URL监控」，刷新后会恢复上次打开的 tab。</li>
+              <li>「监控报警」顶部数字表示当前报警总数。</li>
               <li>报警列表按检查时间倒序排列，时间相同时按记录序号倒序排列。</li>
               <li>表头「命中类型」可筛选全部报警、商品下架、价格上涨或低库存。</li>
               <li>命中类型包括「商品下架」「价格上涨」「低库存」。同一商品命中多个类型时会在同一单元格内分行展示。</li>
               <li>导出时变化信息合并在命中类型列中；价格变化带「¥」标识，库存变化不带币种，缺失值显示为「-」。</li>
-              <li>点击「导出监控报警」可导出全部报警；导出后可确认清空本次已导出的报警数据。</li>
+              <li>点击顶部「导出」并选择「导出监控报警」可导出全部报警；导出后可确认清空本次已导出的报警数据。</li>
               <li>点击来源 URL 可在新页面打开原始商品页面；没有报警或筛选后无结果时会显示空状态。</li>
             </ul>
           </section>
@@ -334,7 +358,7 @@
               <li>点击 URL 打开原始页面；点击商品数会切换到「商品查询」并按该 URL 筛选商品。</li>
               <li>表头「状态」可筛选「全部」「正常」「异常」；历史失效 URL 会在「全部」中显示为「失效」。</li>
               <li>处理失败的 URL 会在状态列显示错误信息；后续成功处理后错误状态会被清除。</li>
-              <li>点击「导出异常URL」可导出全部异常 URL，Excel 包含 URL 和数字 ID 两列。</li>
+              <li>点击顶部「导出」并选择「导出异常URL」可导出全部异常 URL，Excel 包含 URL 和 ID 两列。</li>
               <li>点击「删除」前系统会二次确认；确认后该 URL 会从列表移除，并同步删除该 URL 关联商品，历史报警保留。</li>
             </ul>
           </section>
@@ -346,6 +370,8 @@
               <li>商品名称和 URL 同时填写时，结果需要同时满足两个条件。</li>
               <li>搜索栏左侧会显示当前查询到的商品数量；商品按更新时间倒序展示，时间相同时按商品名称排序。</li>
               <li>商品价格统一带「¥」标识，库存等非价格数字不带币种；库存为 0 时显示「库存不足」。</li>
+              <li>点击顶部「导出」并选择「导出商品」可导出全部商品，不受当前搜索条件或分页影响。</li>
+              <li>三个导出的 ID 均从来源 URL 提取：jinritemai URL 使用 query string 中第一个小写 id 参数值，其他 URL 使用 .html 前路径段的纯数字 ID。</li>
               <li>点击商品来源 URL 可在新页面打开原始页面；没有商品或筛选后无结果时会显示空状态。</li>
             </ul>
           </section>
