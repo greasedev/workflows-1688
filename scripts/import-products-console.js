@@ -2,9 +2,9 @@
   const urls = product_urls_json_string;
 
   const BATCH_SIZE = 30;
-  const WAIT_TIMEOUT = 60_000;
+  const WAIT_TIMEOUT = 60000;
   const POLL_INTERVAL = 300;
-  const POST_CLICK_SETTLE_DELAY = 1_000;
+  const POST_CLICK_SETTLE_DELAY = 5000;
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -255,7 +255,7 @@
         return editor && readEditorText(editor) === "" ? editor : null;
       }, `第 ${batchNumber} 批识别完成后输入区清空`);
 
-    } catch (error) {
+    } catch (_) {
     }
   }
 })();
