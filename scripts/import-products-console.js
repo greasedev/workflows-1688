@@ -1,10 +1,10 @@
 (async () => {
   const urls = product_urls_json_string;
 
-  const BATCH_SIZE = 30;
+  const BATCH_SIZE = 10;
   const WAIT_TIMEOUT = 60000;
   const POLL_INTERVAL = 300;
-  const POST_CLICK_SETTLE_DELAY = 5000;
+  const POST_CLICK_SETTLE_DELAY = 2000;
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
