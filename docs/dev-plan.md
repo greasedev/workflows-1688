@@ -20,10 +20,12 @@
 开发任务：
 
 - 更新 `src/models/types.ts`：
+  - 增加 `SheetAssignment`，字段包括 `sheetName` 和 `sheetOrder`。
   - `Source` 增加 `createdAt`、`updatedAt`、`lastCheckedAt`、`lastError`、`isInvalid`、`invalidAt`。
+  - `Source` 增加当前工作表归属数组 `sheetAssignments`。
   - `Product` 增加 `spec`、`updatedAt`。
   - 增加 `ProductAlertHitType`，可选值为 `missing`、`price_increase`、`low_stock`。
-  - 增加 `ProductAlert`，字段包括 `url`、`name`、`spec`、`hitTypes`、`previousPrice`、`currentPrice`、`previousStock`、`currentStock`、`stockThreshold`、`checkedAt`。
+  - 增加 `ProductAlert`，字段包括 `url`、`name`、`spec`、`hitTypes`、`previousPrice`、`currentPrice`、`previousStock`、`currentStock`、`stockThreshold`、`checkedAt` 和工作表归属快照 `sheetAssignments`。
   - 增加 `AppSettings`，字段包括 `id`、`monitorHourlyRate`、`stockAlertThreshold`、`enabledAlertTypes`、`updatedAt`。
   - 增加工作流结果摘要类型，例如成功 URL 数、失败 URL 数、更新商品数、库存置零商品数、命中记录数和错误摘要。
 - 更新 `src/libs/db.ts`：
@@ -51,18 +53,20 @@
 
 ### 2.2 Excel 导入能力
 
-目标：实现用户通过 Excel 导入 URL 列表，扫描第一个工作表的全部单元格并合并去重。
+目标：实现用户通过 Excel 导入 URL 列表，扫描全部工作表的全部单元格，保存 URL 的工作表归属并去重。
 
 开发任务：
 
 - 新增依赖 `xlsx`，用于浏览器端解析 Excel。
 - 在 `src/pages/index.ts` 中实现文件读取：
-  - 读取第一个工作表。
-  - 扫描全部单元格，包括首行，不要求固定表头或固定 URL 列。
+  - 读取全部工作表。
+  - 扫描每个工作表的全部单元格，包括首行，不要求固定表头或固定 URL 列。
+  - 保存 URL 所属工作表名称和工作表顺序；同一 URL 可以保存多个工作表归属。
   - 对每个单元格内容做 `trim`，仅接受内容整体为完整绝对 URL 的记录。
   - 忽略空值、普通文本和不完整 URL，仅导入 `http` 或 `https` 的 `1688.com`、`jinritemai.com` 及其子域名 URL。
 - 实现合并去重写入：
   - 已存在 URL 不重复插入。
+  - 已存在 URL 的当前工作表归属以本次导入文件为准。
   - 新 URL 写入 `source`，带上 `createdAt` 和 `updatedAt`。
   - 导入完成后展示新增 URL 数、重复 URL 数、无效或空 URL 数。
 
@@ -173,6 +177,8 @@ URL 监控列表交互：
 - 商品查询搜索栏左侧结果数量文案与当前筛选结果总数一致。
 - 商品查询结果超过 20 条时可以通过上一页、下一页分页查看。
 - 顶部导出按钮能展开三个导出操作，商品导出能输出全部商品。
+- 三类导出按工作表归属生成多工作表文件；异常 URL 和商品使用当前归属，监控报警使用报警产生时保存的归属快照。
+- 同一记录属于多个工作表时重复导出，旧数据缺少归属时导出到 `未分组`，仅创建有数据的工作表并保持导入顺序。
 
 ### 2.4 Workflow 批量更新
 
@@ -225,6 +231,7 @@ URL 监控列表交互：
   - jinritemai 显式下架商品只生成 `missing`；首次发现即下架也生成报警，历史库存已为 `0` 时不重复生成。
   - 商品命中记录采用追加模式，不覆盖历史记录。
   - 商品命中记录只保留 `checkedAt` 一个时间字段。
+  - 商品命中记录保存报警产生时 Source 的工作表归属快照，后续 URL 移动或删除不改变历史报警分组。
   - 新增命中记录、商品 upsert、缺失商品库存置零和成功状态更新应在同一 URL 的处理流程中完成；任一步失败时，该 URL 按失败处理并记录 `lastError`。
 - 更新 URL 检查状态：
   - 成功时更新 `lastCheckedAt`，清空 `lastError`。
@@ -294,6 +301,8 @@ URL 监控列表交互：
 - 商品查询搜索栏左侧文案随筛选条件变化更新；清空筛选后显示 `已查询到0件商品。`。
 - 商品查询结果每页展示 20 条；筛选条件变化后回到第 1 页。
 - 导出菜单支持按钮、外部点击、`Escape` 和选择操作关闭；导出商品不受查询筛选或分页影响。
+- 导入包含多个工作表的文件后，三个导出仅创建有数据的工作表并保持导入顺序；同一 URL 属于多个工作表时相关记录在各工作表中分别导出。
+- URL 后续移动工作表后，异常 URL 和商品跟随当前分组，历史报警仍使用产生时的分组；缺少分组信息的旧数据进入 `未分组`。
 - jinritemai URL 的 query string 包含 `id=12345` 时，三类导出的 ID 均为 `12345`；缺少或空 `id` 时为空，其他 URL 保持现有 ID 提取规则。
 - 工作流处理多个 URL，其中一个失败时整体继续执行。
 - 工作流遇到失效 URL 时跳过，并在摘要中统计跳过数量。
@@ -331,7 +340,7 @@ URL 监控列表交互：
 ## 4. 风险与处理策略
 
 - API 返回结构不稳定：实现解析函数，兼容数组、`products`、`skus`、`data` 等常见结构；无法识别时记录 URL 错误并继续。
-- Excel 内容不规范：扫描第一个工作表全部单元格；普通文本、空值和不完整 URL 直接忽略，非支持域名 URL 不导入并在导入结果中统计。
+- Excel 内容不规范：扫描全部工作表的全部单元格；普通文本、空值和不完整 URL 直接忽略，非支持域名 URL 不导入并在导入结果中统计。
 - IndexedDB schema 升级：如果已有用户数据，使用 Dexie 新版本迁移，不删除旧表数据。
 - 大量 URL 导致页面卡顿：URL 监控列表和商品查询结果均按每页 20 条分页；商品查询仍按本地查询实现。
 - 商品名称或规格变更导致重复记录：首版按 PRD 使用 `[name+spec+url]` 唯一判断，不额外引入 SKU ID 推断。

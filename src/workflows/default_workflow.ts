@@ -398,6 +398,10 @@ function buildProductAlerts(
   return alerts;
 }
 
+function snapshotSheetAssignments(source: Source): Source['sheetAssignments'] {
+  return source.sheetAssignments?.map((assignment) => ({ ...assignment }));
+}
+
 function extractRawProducts(result: ExecutionResult): RawProduct[] {
   if (!result.success) {
     throw new WorkflowUserError(
@@ -523,7 +527,10 @@ async function persistSourceProducts(
       stockAlertThreshold,
       new Set(enabledAlertTypes),
       explicitlyOfflineProductKeys,
-    );
+    ).map((alert) => ({
+      ...alert,
+      sheetAssignments: snapshotSheetAssignments(source),
+    }));
 
     if (alerts.length > 0) {
       await productAlertTable.bulkAdd(alerts);

@@ -6,7 +6,14 @@ import {
   saveAppSettings,
   SETTINGS_LIMITS,
 } from "../libs/settings";
-import type { AppSettings, Product, ProductAlert, ProductAlertHitType, Source } from "../models/types";
+import type {
+  AppSettings,
+  Product,
+  ProductAlert,
+  ProductAlertHitType,
+  SheetAssignment,
+  Source,
+} from "../models/types";
 
 type ImportStats = {
   added: number;
@@ -19,6 +26,7 @@ type ImportStats = {
 type ImportPreview = {
   stats: ImportStats;
   newSources: Source[];
+  updatedSources: Source[];
   removedSourceIds: number[];
   removedUrls: string[];
 };
@@ -77,6 +85,8 @@ const ALERT_HIT_TYPE_LABELS: Record<ProductAlertHitType, string> = {
   price_increase: "价格上涨",
   low_stock: "低库存",
 };
+const UNGROUPED_SHEET_NAME = "未分组";
+const UNGROUPED_SHEET_ORDER = Number.MAX_SAFE_INTEGER;
 
 // 扩展 Window 类型以包含 agentOptions
 declare global {
@@ -764,45 +774,68 @@ function formatImportStats(stats: ImportStats): string {
 async function previewImportExcel(file: File): Promise<ImportPreview> {
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: "array" });
-  const sheetName = workbook.SheetNames[0];
-  if (!sheetName) {
+  if (workbook.SheetNames.length === 0) {
     throw new Error("Excel 文件没有工作表。");
   }
 
-  const sheet = workbook.Sheets[sheetName];
-  const rows = readSheetRows(sheet);
-
   const existingSources = await sourceTable.toArray();
-  const existingUrls = new Set(existingSources.map((source) => source.url));
+  const existingByUrl = new Map(existingSources.map((source) => [source.url, source]));
   const desiredUrls = new Set<string>();
+  const assignmentsByUrl = new Map<string, SheetAssignment[]>();
   const now = new Date().toISOString();
   const newSources: Source[] = [];
+  const updatedSources: Source[] = [];
   const stats = createEmptyImportStats();
 
-  for (const row of rows) {
-    for (const cell of row) {
-      const { url, isValidUrl } = normalizeImportUrl(cell);
-      if (!url) {
-        if (isValidUrl) {
-          stats.unsupportedDomain += 1;
+  for (const [sheetOrder, sheetName] of workbook.SheetNames.entries()) {
+    const sheet = workbook.Sheets[sheetName];
+    const rows = readSheetRows(sheet);
+    const seenInSheet = new Set<string>();
+
+    for (const row of rows) {
+      for (const cell of row) {
+        const { url, isValidUrl } = normalizeImportUrl(cell);
+        if (!url) {
+          if (isValidUrl) {
+            stats.unsupportedDomain += 1;
+          }
+          continue;
         }
-        continue;
-      }
 
-      if (desiredUrls.has(url)) {
-        stats.duplicate += 1;
-        continue;
-      }
+        if (seenInSheet.has(url)) {
+          stats.duplicate += 1;
+          continue;
+        }
+        seenInSheet.add(url);
 
-      desiredUrls.add(url);
-      if (existingUrls.has(url)) {
-        stats.duplicate += 1;
-        continue;
-      }
+        const assignments = assignmentsByUrl.get(url) ?? [];
+        assignments.push({ sheetName, sheetOrder });
+        assignmentsByUrl.set(url, assignments);
 
+        if (desiredUrls.has(url)) {
+          stats.duplicate += 1;
+          continue;
+        }
+        desiredUrls.add(url);
+      }
+    }
+  }
+
+  for (const url of desiredUrls) {
+    const existingSource = existingByUrl.get(url);
+    const sheetAssignments = assignmentsByUrl.get(url) ?? [];
+    if (existingSource) {
+      stats.duplicate += 1;
+      updatedSources.push({
+        ...existingSource,
+        sheetAssignments,
+        updatedAt: now,
+      });
+    } else {
       stats.added += 1;
       newSources.push({
         url,
+        sheetAssignments,
         createdAt: now,
         updatedAt: now,
       });
@@ -826,6 +859,7 @@ async function previewImportExcel(file: File): Promise<ImportPreview> {
   return {
     stats,
     newSources,
+    updatedSources,
     removedSourceIds,
     removedUrls,
   };
@@ -835,6 +869,9 @@ async function commitImportExcel(preview: ImportPreview): Promise<ImportStats> {
   await db.transaction("rw", sourceTable, productTable, async () => {
     if (preview.newSources.length > 0) {
       await sourceTable.bulkAdd(preview.newSources);
+    }
+    if (preview.updatedSources.length > 0) {
+      await sourceTable.bulkPut(preview.updatedSources);
     }
     if (preview.removedSourceIds.length > 0) {
       await sourceTable.bulkDelete(preview.removedSourceIds);
@@ -902,6 +939,75 @@ function downloadWorkbook(workbook: XLSX.WorkBook, filename: string) {
   URL.revokeObjectURL(objectUrl);
 }
 
+type ExportSheetGroup<Row extends Record<string, unknown>> = {
+  sheetName: string;
+  sheetOrder: number;
+  rows: Row[];
+};
+
+function normalizedSheetAssignments(assignments?: SheetAssignment[]): SheetAssignment[] {
+  if (!assignments || assignments.length === 0) {
+    return [{ sheetName: UNGROUPED_SHEET_NAME, sheetOrder: UNGROUPED_SHEET_ORDER }];
+  }
+
+  const byName = new Map<string, SheetAssignment>();
+  for (const assignment of assignments) {
+    const sheetName = assignment.sheetName.trim() || UNGROUPED_SHEET_NAME;
+    const sheetOrder = Number.isFinite(assignment.sheetOrder)
+      ? assignment.sheetOrder
+      : UNGROUPED_SHEET_ORDER;
+    const existing = byName.get(sheetName);
+    if (!existing || sheetOrder < existing.sheetOrder) {
+      byName.set(sheetName, { sheetName, sheetOrder });
+    }
+  }
+
+  return Array.from(byName.values());
+}
+
+function groupExportRows<Item, Row extends Record<string, unknown>>(
+  items: Item[],
+  assignmentsForItem: (item: Item) => SheetAssignment[] | undefined,
+  rowForItem: (item: Item) => Row,
+): ExportSheetGroup<Row>[] {
+  const groupsByName = new Map<string, ExportSheetGroup<Row>>();
+
+  for (const item of items) {
+    for (const assignment of normalizedSheetAssignments(assignmentsForItem(item))) {
+      const existing = groupsByName.get(assignment.sheetName);
+      if (existing) {
+        existing.sheetOrder = Math.min(existing.sheetOrder, assignment.sheetOrder);
+        existing.rows.push(rowForItem(item));
+        continue;
+      }
+
+      groupsByName.set(assignment.sheetName, {
+        sheetName: assignment.sheetName,
+        sheetOrder: assignment.sheetOrder,
+        rows: [rowForItem(item)],
+      });
+    }
+  }
+
+  return Array.from(groupsByName.values()).sort(
+    (a, b) =>
+      a.sheetOrder - b.sheetOrder ||
+      a.sheetName.localeCompare(b.sheetName, "zh-CN"),
+  );
+}
+
+function createGroupedExportWorkbook<Row extends Record<string, unknown>>(
+  groups: ExportSheetGroup<Row>[],
+  headers: string[],
+): XLSX.WorkBook {
+  const workbook = XLSX.utils.book_new();
+  for (const group of groups) {
+    const worksheet = XLSX.utils.json_to_sheet(group.rows, { header: headers });
+    XLSX.utils.book_append_sheet(workbook, worksheet, group.sheetName);
+  }
+  return workbook;
+}
+
 function setExportMenuOpen(open: boolean) {
   exportMenu.hidden = !open;
   exportMenuButton.setAttribute("aria-expanded", String(open));
@@ -920,20 +1026,24 @@ async function exportErrorUrls() {
     return;
   }
 
-  const rows = errorSources.map((source) => ({
-    URL: source.url,
-    ID: extractProductIdFromUrl(source.url),
-  }));
-  const worksheet = XLSX.utils.json_to_sheet(rows, {
-    header: ["URL", "ID"],
-  });
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, "异常URL");
+  const groups = groupExportRows(
+    errorSources,
+    (source) => source.sheetAssignments,
+    (source) => ({
+      URL: source.url,
+      ID: extractProductIdFromUrl(source.url),
+    }),
+  );
+  const workbook = createGroupedExportWorkbook(groups, ["URL", "ID"]);
   downloadWorkbook(workbook, `异常URL-${formatExportTimestamp()}.xlsx`);
 }
 
 async function exportProducts() {
-  const products = (await productTable.toArray()).sort((a, b) => {
+  const [allProducts, sources] = await Promise.all([
+    productTable.toArray(),
+    sourceTable.toArray(),
+  ]);
+  const products = allProducts.sort((a, b) => {
     const timeDiff =
       new Date(b.updatedAt ?? 0).getTime() - new Date(a.updatedAt ?? 0).getTime();
     return timeDiff || a.name.localeCompare(b.name, "zh-CN");
@@ -944,17 +1054,25 @@ async function exportProducts() {
     return;
   }
 
-  const rows = products.map((product) => ({
-    ID: extractProductIdFromUrl(product.url),
-    商品名称: product.name,
-    规格: product.spec,
-    价格: product.price,
-    库存: product.stock,
-    来源URL: product.url,
-    更新时间: formatDate(product.updatedAt),
-  }));
-  const worksheet = XLSX.utils.json_to_sheet(rows, {
-    header: [
+  const assignmentsByUrl = new Map(
+    sources.map((source) => [source.url, source.sheetAssignments]),
+  );
+  const groups = groupExportRows(
+    products,
+    (product) => assignmentsByUrl.get(product.url),
+    (product) => ({
+      ID: extractProductIdFromUrl(product.url),
+      商品名称: product.name,
+      规格: product.spec,
+      价格: product.price,
+      库存: product.stock,
+      来源URL: product.url,
+      更新时间: formatDate(product.updatedAt),
+    }),
+  );
+  const workbook = createGroupedExportWorkbook(
+    groups,
+    [
       "ID",
       "商品名称",
       "规格",
@@ -963,9 +1081,7 @@ async function exportProducts() {
       "来源URL",
       "更新时间",
     ],
-  });
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, "商品信息");
+  );
   downloadWorkbook(workbook, `商品信息-${formatExportTimestamp()}.xlsx`);
 }
 
@@ -998,16 +1114,21 @@ async function exportAlerts() {
   const exportedAlertIds = alerts
     .map((alert) => alert.id)
     .filter((id): id is number => id !== undefined);
-  const rows = alerts.map((alert) => ({
-    ID: extractProductIdFromUrl(alert.url),
-    商品名称: alert.name,
-    规格: alert.spec,
-    命中类型: formatAlertHitTypeLines(alert),
-    来源URL: alert.url,
-    检查时间: formatDate(alert.checkedAt),
-  }));
-  const worksheet = XLSX.utils.json_to_sheet(rows, {
-    header: [
+  const groups = groupExportRows(
+    alerts,
+    (alert) => alert.sheetAssignments,
+    (alert) => ({
+      ID: extractProductIdFromUrl(alert.url),
+      商品名称: alert.name,
+      规格: alert.spec,
+      命中类型: formatAlertHitTypeLines(alert),
+      来源URL: alert.url,
+      检查时间: formatDate(alert.checkedAt),
+    }),
+  );
+  const workbook = createGroupedExportWorkbook(
+    groups,
+    [
       "ID",
       "商品名称",
       "规格",
@@ -1015,10 +1136,7 @@ async function exportAlerts() {
       "来源URL",
       "检查时间",
     ],
-  });
-  const workbook = XLSX.utils.book_new();
-
-  XLSX.utils.book_append_sheet(workbook, worksheet, "监控报警");
+  );
   downloadWorkbook(workbook, `监控报警-${formatExportTimestamp()}.xlsx`);
 
   const shouldClear = await confirmClearExportedAlerts(alerts.length);

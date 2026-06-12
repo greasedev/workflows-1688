@@ -1,6 +1,12 @@
+export interface SheetAssignment {
+  sheetName: string; // 导入工作簿中的工作表名称
+  sheetOrder: number; // 工作表在导入工作簿中的顺序
+}
+
 export interface Source {
   id?: number; // 数据库自增主键（可选，仅在数据库记录中存在）
   url: string; // 商品所在URL
+  sheetAssignments?: SheetAssignment[]; // 当前导入清单中的工作表归属
   createdAt?: string; // 首次导入时间
   updatedAt?: string; // 最近更新URL记录的时间
   lastCheckedAt?: string; // 最近一次工作流检查时间
@@ -33,6 +39,7 @@ export interface ProductAlert {
   currentStock?: number; // 本次获取到的新库存
   stockThreshold: number; // 低库存阈值
   checkedAt: string; // 本次工作流检查时间
+  sheetAssignments?: SheetAssignment[]; // 报警产生时的工作表归属快照
 }
 
 export interface AppSettings {
