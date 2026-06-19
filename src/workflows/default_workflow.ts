@@ -27,6 +27,7 @@
 import { Agent, type Dexie, type WorkflowContext, type WorkflowResult } from '@greasedev/workflow-sdk';
 import { createWorkflowApis, type ExecutionResult } from '../api';
 import { DB_TABLES, initDB } from '../libs/db';
+import { isJinritemaiUrl, productMatchKey } from '../libs/product-identity';
 import { getAppSettings } from '../libs/settings';
 import type { AppSettings, Product, ProductAlert, ProductAlertHitType, Source, WorkflowSummary } from '../models/types';
 
@@ -59,7 +60,6 @@ const PRICE_KEYS = ['price'];
 const STOCK_KEYS = ['stock', 'stock_num_sum'];
 const JINRITEMAI_URL_KEYS = ['url'];
 const JINRITEMAI_OFFLINE_KEY = 'live_add_enum';
-const JINRITEMAI_DOMAIN = 'jinritemai.com';
 const JINRITEMAI_BATCH_SIZE = 50;
 const CAPTCHA_REQUIRED_MESSAGE = 'captcha-required';
 const ONE_HOUR_MS = 60 * 60 * 1000;
@@ -190,15 +190,6 @@ function readFirstNumber(record: RawProduct, keys: string[]): number | null {
   return null;
 }
 
-function isJinritemaiUrl(url: string): boolean {
-  try {
-    const hostname = new URL(url).hostname.toLowerCase();
-    return hostname === JINRITEMAI_DOMAIN || hostname.endsWith(`.${JINRITEMAI_DOMAIN}`);
-  } catch {
-    return false;
-  }
-}
-
 function normalizeUrlForMatch(value: unknown): string | null {
   const url = String(value ?? '').trim();
   if (!url) return null;
@@ -231,7 +222,7 @@ function normalizeProducts(rawProducts: RawProduct[], url: string, updatedAt: st
       continue;
     }
 
-    productsByKey.set(productKey({ name, spec, url }), {
+    productsByKey.set(productMatchKey({ name, spec, url }), {
       name,
       spec,
       url,
@@ -263,7 +254,7 @@ function normalizeJinritemaiProducts(
       continue;
     }
 
-    const key = productKey({ name, spec, url });
+    const key = productMatchKey({ name, spec, url });
     const existingProduct = existingByKey.get(key);
     const parsedPriceInCents = readFirstNumber(rawProduct, PRICE_KEYS);
     const priceInYuan =
@@ -295,12 +286,8 @@ function normalizeJinritemaiProducts(
   };
 }
 
-function productKey(product: Pick<Product, 'name' | 'spec' | 'url'>): string {
-  return `${product.url}\u0000${product.name}\u0000${product.spec}`;
-}
-
 function buildProductMap(products: Product[]): Map<string, Product> {
-  return new Map(products.map((product) => [productKey(product), product]));
+  return new Map(products.map((product) => [productMatchKey(product), product]));
 }
 
 function createProductAlert(
@@ -337,8 +324,8 @@ function buildProductAlerts(
   const currentByKey = buildProductMap(currentProducts);
 
   for (const currentProduct of currentProducts) {
-    const existingProduct = existingByKey.get(productKey(currentProduct));
-    if (explicitlyOfflineProductKeys.has(productKey(currentProduct))) {
+    const existingProduct = existingByKey.get(productMatchKey(currentProduct));
+    if (explicitlyOfflineProductKeys.has(productMatchKey(currentProduct))) {
       if (
         enabledAlertTypes.has('missing') &&
         (!existingProduct || existingProduct.stock !== 0)
@@ -383,7 +370,7 @@ function buildProductAlerts(
   for (const existingProduct of existingProducts) {
     if (
       !enabledAlertTypes.has('missing') ||
-      currentByKey.has(productKey(existingProduct)) ||
+      currentByKey.has(productMatchKey(existingProduct)) ||
       existingProduct.stock === 0
     ) {
       continue;
@@ -436,12 +423,11 @@ function extractProducts(result: ExecutionResult, url: string, updatedAt: string
   return products;
 }
 
-async function upsertProduct(productTable: Dexie.Table<Product, number>, product: Product) {
-  const existing = await productTable
-    .where('[name+spec+url]')
-    .equals([product.name, product.spec, product.url])
-    .first() as Product | undefined;
-
+async function upsertProduct(
+  productTable: Dexie.Table<Product, number>,
+  product: Product,
+  existing?: Product,
+) {
   await productTable.put({
     ...existing,
     ...product,
@@ -519,7 +505,7 @@ async function persistSourceProducts(
     };
     const existingProducts = await productTable.where('url').equals(source.url).toArray() as Product[];
     const existingByKey = buildProductMap(existingProducts);
-    const currentProductKeys = new Set(products.map(productKey));
+    const currentProductKeys = new Set(products.map(productMatchKey));
     const alerts = buildProductAlerts(
       existingProducts,
       products,
@@ -538,20 +524,20 @@ async function persistSourceProducts(
     }
 
     for (const product of products) {
-      const existingProduct = existingByKey.get(productKey(product));
+      const existingProduct = existingByKey.get(productMatchKey(product));
       if (
-        explicitlyOfflineProductKeys.has(productKey(product)) &&
+        explicitlyOfflineProductKeys.has(productMatchKey(product)) &&
         existingProduct &&
         existingProduct.stock !== 0
       ) {
         counts.zeroedProducts += 1;
       }
-      await upsertProduct(productTable, product);
+      await upsertProduct(productTable, product, existingProduct);
       counts.updatedProducts += 1;
     }
 
     for (const existingProduct of existingProducts) {
-      if (currentProductKeys.has(productKey(existingProduct)) || existingProduct.stock === 0) {
+      if (currentProductKeys.has(productMatchKey(existingProduct)) || existingProduct.stock === 0) {
         continue;
       }
 

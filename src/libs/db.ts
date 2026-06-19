@@ -1,4 +1,6 @@
 import { Agent } from "@greasedev/workflow-sdk";
+import type { Product } from "../models/types";
+import { compareProductsByRecency, isJinritemaiUrl } from "./product-identity";
 
 export const DB_TABLES = {
   source: "source",
@@ -35,6 +37,36 @@ export function initDB(agent: Agent) {
     [DB_TABLES.product]: "++id, &[name+spec+url], name, spec, url, stock, updatedAt",
     [DB_TABLES.productAlert]: "++id, url, name, spec, checkedAt, [name+spec+url]",
     [DB_TABLES.settings]: "&id, updatedAt",
+  });
+  db.version(7).stores({
+    [DB_TABLES.source]: "++id, &url, isInvalid, updatedAt, lastCheckedAt",
+    [DB_TABLES.product]: "++id, &[name+spec+url], name, spec, url, stock, updatedAt",
+    [DB_TABLES.productAlert]: "++id, url, name, spec, checkedAt, [name+spec+url]",
+    [DB_TABLES.settings]: "&id, updatedAt",
+  }).upgrade(async (transaction) => {
+    const productTable = transaction.table<Product, number>(DB_TABLES.product);
+    const products = await productTable.toArray();
+    const productsByJinritemaiUrl = new Map<string, Product[]>();
+
+    for (const product of products) {
+      if (!isJinritemaiUrl(product.url)) continue;
+      const groupedProducts = productsByJinritemaiUrl.get(product.url) ?? [];
+      groupedProducts.push(product);
+      productsByJinritemaiUrl.set(product.url, groupedProducts);
+    }
+
+    const duplicateIds: number[] = [];
+    for (const groupedProducts of productsByJinritemaiUrl.values()) {
+      if (groupedProducts.length < 2) continue;
+      groupedProducts.sort(compareProductsByRecency);
+      for (const duplicate of groupedProducts.slice(1)) {
+        if (duplicate.id !== undefined) duplicateIds.push(duplicate.id);
+      }
+    }
+
+    if (duplicateIds.length > 0) {
+      await productTable.bulkDelete(duplicateIds);
+    }
   });
   return db;
 }

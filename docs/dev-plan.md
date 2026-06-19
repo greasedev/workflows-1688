@@ -36,6 +36,7 @@
   - 新增 `product_alert` 表，索引包含 `url`、`name`、`spec`、`checkedAt`、`[name+spec+url]`。
   - 新增 `settings` 表，使用 `id = global` 保存唯一全局设置记录，索引为 `&id, updatedAt`。
   - 如 schema 版本需要变更，使用新的 Dexie 版本迁移，避免破坏已有数据；规格字段升级使用 `[name+spec+url]` 约束。
+  - 数据库唯一索引继续保持 `[name+spec+url]`；迁移时合并同一 jinritemai URL 的历史重复商品，保留更新时间最新、同时间下 `id` 最大的记录。
 - 新增共享设置 helper：
   - 默认值为 `monitorHourlyRate = 180`（每组每分钟 3 次接口调用）、`stockAlertThreshold = 100`，三类报警默认全部激活。
   - `monitorHourlyRate` 校验范围为 `1-360`。
@@ -213,7 +214,7 @@ URL 监控列表交互：
   - jinritemai 商品 `live_add_enum` 包含 `下架` 时视为显式下架，强制库存为 `0`。
   - jinritemai 显式下架商品允许缺少价格；已有商品保留历史价格，首次出现使用 `0`。
 - 实现商品写入：
-  - 同一 URL 下按 `[name+spec+url]` upsert。
+  - jinritemai 商品按 URL 匹配并携带原 `id` upsert；其他来源按 `[name+spec+url]` upsert。
   - 更新 `price`、`stock`、`updatedAt`。
   - 记录本次 URL 返回的商品名称和规格集合。
 - 实现缺失商品库存置零：
@@ -221,7 +222,7 @@ URL 监控列表交互：
   - 历史商品如果本次同名同规格记录未出现，将 `stock` 更新为 `0`，并更新 `updatedAt`。
 - 实现商品命中记录：
   - 每个 URL 获取到本次商品数据后，先查询该 URL 下所有历史商品。
-  - 使用 `[name+spec+url]` 构建历史商品 Map 和本次商品 Map。
+  - jinritemai 使用 URL、其他来源使用 `[name+spec+url]` 构建历史商品 Map 和本次商品 Map。
   - 历史商品本次不存在且历史库存不为 `0` 时，追加 `missing` 命中记录。
   - 历史商品价格低于本次价格时，追加 `price_increase` 命中记录。
   - 本次商品库存小于 `stockAlertThreshold`，且无历史商品或历史库存不小于该阈值时，追加 `low_stock` 命中记录；库存等于阈值不命中。
@@ -229,6 +230,7 @@ URL 监控列表交互：
   - 同一商品同一轮命中多种情况时，只写入一条 `ProductAlert`，`hitTypes` 保存全部命中类型。
   - 命中类型按 `enabledAlertTypes` 过滤；过滤后为空时不写报警，但商品和来源状态仍正常更新。
   - jinritemai 显式下架商品只生成 `missing`；首次发现即下架也生成报警，历史库存已为 `0` 时不重复生成。
+  - jinritemai 商品改名或修改规格时更新同一记录，继续比较历史价格和库存，不生成旧名称商品的 `missing` 报警。
   - 商品命中记录采用追加模式，不覆盖历史记录。
   - 商品命中记录只保留 `checkedAt` 一个时间字段。
   - 商品命中记录保存报警产生时 Source 的工作表归属快照，后续 URL 移动或删除不改变历史报警分组。
@@ -343,7 +345,7 @@ URL 监控列表交互：
 - Excel 内容不规范：扫描全部工作表的全部单元格；普通文本、空值和不完整 URL 直接忽略，非支持域名 URL 不导入并在导入结果中统计。
 - IndexedDB schema 升级：如果已有用户数据，使用 Dexie 新版本迁移，不删除旧表数据。
 - 大量 URL 导致页面卡顿：URL 监控列表和商品查询结果均按每页 20 条分页；商品查询仍按本地查询实现。
-- 商品名称或规格变更导致重复记录：首版按 PRD 使用 `[name+spec+url]` 唯一判断，不额外引入 SKU ID 推断。
+- 商品名称或规格变更：jinritemai 按 URL 更新同一商品，其他来源继续按 `[name+spec+url]` 判断，不额外引入 SKU ID 推断。
 - 商品命中记录增长较快：当前按业务要求采用追加模式；后续如果需要页面展示或清理策略，再增加查询分页和保留周期能力。
 
 ## 5. 完成定义
